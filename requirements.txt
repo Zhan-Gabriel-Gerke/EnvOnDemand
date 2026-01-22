@@ -1,0 +1,13 @@
+docker
+setuptools
+fastapi
+uvicorn[standard]
+sqlmodel
+asyncpg
+alembic
+docker
+pydantic-settings
+# Тесты
+pytest
+pytest-asyncio
+httpx
