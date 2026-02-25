@@ -16,7 +16,7 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     """Schema for creating a project (Command)."""
-    pass
+    owner_id: Optional[uuid.UUID] = None
 
 
 class ProjectRead(ProjectBase):

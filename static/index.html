@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnvOnDemand</title>
+    <style>
+        /* ===== RESET ===== */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #0f1117;
+            color: #e2e8f0;
+            display: flex;
+            flex-direction: row;
+            min-height: 100vh;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            width: 220px;
+            min-width: 220px;
+            background: #151822;
+            border-right: 1px solid #1e2332;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 20px 16px;
+            border-bottom: 1px solid #1e2332;
+        }
+
+        .brand-icon {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            border-radius: 8px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .brand-name {
+            font-weight: 700;
+            font-size: 14px;
+            color: #f0f4ff;
+        }
+
+        .brand-sub {
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        .sidebar-nav {
+            padding: 8px 0;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 16px;
+            color: #8892a4;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .nav-item:hover {
+            color: #e2e8f0;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .nav-item.active {
+            color: #fff;
+            background: rgba(59, 130, 246, 0.1);
+            border-left-color: #3b82f6;
+        }
+
+        .sidebar-section {
+            padding: 14px 16px 4px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            color: #374151;
+            text-transform: uppercase;
+        }
+
+        .project-list {
+            overflow-y: auto;
+        }
+
+        .project-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 16px;
+            font-size: 13px;
+            color: #94a3b8;
+            cursor: pointer;
+        }
+
+        .project-item:hover {
+            color: #e2e8f0;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .dot-g {
+            background: #22c55e;
+        }
+
+        .dot-b {
+            background: #3b82f6;
+        }
+
+        .dot-o {
+            background: #f97316;
+        }
+
+        .dot-p {
+            background: #a855f7;
+        }
+
+        .dot-r {
+            background: #ef4444;
+        }
+
+        .sidebar-user {
+            margin-top: auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px;
+            border-top: 1px solid #1e2332;
+        }
+
+        .user-avatar {
+            width: 30px;
+            height: 30px;
+            min-width: 30px;
+            border-radius: 50%;
+            background: #3b82f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .user-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .user-email {
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        /* ===== MAIN ===== */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow-y: auto;
+            height: 100vh;
+        }
+
+        /* ===== TOPBAR ===== */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 28px;
+            border-bottom: 1px solid #1e2332;
+            background: #0f1117;
+            flex-shrink: 0;
+        }
+
+        .page-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #f0f4ff;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 8px;
+            padding: 7px 12px;
+        }
+
+        .search-box input {
+            background: none;
+            border: none;
+            outline: none;
+            color: #e2e8f0;
+            font-size: 13px;
+            width: 180px;
+            font-family: inherit;
+        }
+
+        .search-box input::placeholder {
+            color: #4a5568;
+        }
+
+        .btn-create {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+
+        .btn-create:hover {
+            background: #2563eb;
+        }
+
+        /* ===== VIEW CONTAINERS ===== */
+        .view-container {
+            display: none;
+            padding: 24px 28px;
+        }
+
+        .view-container.view-active {
+            display: block;
+        }
+
+        /* ===== STAT CARDS ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 18px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #64748b;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #f0f4ff;
+        }
+
+        .stat-sub {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 6px;
+        }
+
+        .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .si-g {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+
+        .si-b {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+        }
+
+        .si-r {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+        }
+
+        /* ===== TABLE ===== */
+        .table-card {
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .env-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .env-table th {
+            padding: 12px 18px;
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: 0.07em;
+            color: #4a5568;
+            text-align: left;
+            border-bottom: 1px solid #1e2332;
+        }
+
+        .env-table td {
+            padding: 13px 18px;
+            font-size: 13px;
+            color: #cbd5e1;
+            border-bottom: 1px solid #1a1f2e;
+            vertical-align: middle;
+        }
+
+        .env-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .env-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .env-name {
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        .env-id {
+            font-size: 11px;
+            color: #4a5568;
+            font-family: monospace;
+        }
+
+        /* Status badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 9px;
+            border-radius: 20px;
+            font-size: 11.5px;
+            font-weight: 600;
+        }
+
+        .badge::before {
+            content: '●';
+            font-size: 7px;
+        }
+
+        .badge-RUNNING,
+        .badge-running {
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.25);
+        }
+
+        .badge-PENDING,
+        .badge-pending {
+            background: rgba(59, 130, 246, 0.12);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+        }
+
+        .badge-STOPPED,
+        .badge-stopped {
+            background: rgba(100, 116, 139, 0.12);
+            color: #94a3b8;
+            border: 1px solid rgba(100, 116, 139, 0.25);
+        }
+
+        .badge-FAILED,
+        .badge-failed {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        /* Action icons */
+        .actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .ab {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            border: 1px solid #1e2332;
+            background: #1a1f2e;
+            color: #8892a4;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            text-decoration: none;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+
+        .ab:hover {
+            background: #242a3b;
+            color: #e2e8f0;
+        }
+
+        .ab.del:hover {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .table-footer {
+            padding: 12px 18px;
+            font-size: 12px;
+            color: #4a5568;
+            border-top: 1px solid #1e2332;
+        }
+
+        .empty-row {
+            text-align: center;
+            color: #4a5568;
+            padding: 48px !important;
+        }
+
+        /* ===== CREATE FORM ===== */
+        .form-card {
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 12px;
+            padding: 28px;
+            max-width: 640px;
+        }
+
+        .form-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            color: #f0f4ff;
+        }
+
+        .fg {
+            margin-bottom: 18px;
+        }
+
+        .fl {
+            display: block;
+            font-size: 11.5px;
+            font-weight: 500;
+            color: #8892a4;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .fi {
+            width: 100%;
+            background: #0f1117;
+            border: 1px solid #1e2332;
+            border-radius: 7px;
+            padding: 9px 12px;
+            color: #e2e8f0;
+            font-size: 13.5px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .fi:focus {
+            border-color: #3b82f6;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 160px;
+            gap: 14px;
+        }
+
+        .radio-grp {
+            display: flex;
+            gap: 20px;
+        }
+
+        .rl {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #cbd5e1;
+        }
+
+        .rl input {
+            accent-color: #3b82f6;
+        }
+
+        .ev-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 34px;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 24px;
+        }
+
+        .btn-cancel {
+            padding: 9px 18px;
+            border-radius: 7px;
+            border: 1px solid #1e2332;
+            background: none;
+            color: #8892a4;
+            font-size: 13.5px;
+            cursor: pointer;
+            font-family: inherit;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .btn-cancel:hover {
+            color: #e2e8f0;
+        }
+
+        .btn-submit {
+            padding: 9px 22px;
+            border-radius: 7px;
+            border: none;
+            background: #3b82f6;
+            color: #fff;
+            font-size: 13.5px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .btn-submit:hover {
+            background: #2563eb;
+        }
+
+        .btn-add {
+            padding: 7px 12px;
+            border-radius: 7px;
+            border: 1px dashed #2a3350;
+            background: none;
+            color: #8892a4;
+            font-size: 12.5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .btn-add:hover {
+            border-color: #3b82f6;
+            color: #3b82f6;
+        }
+
+        /* ===== DETAILS ===== */
+        .dg {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 20px;
+        }
+
+        .dp {
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 12px;
+            padding: 22px;
+        }
+
+        .dh {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 14px;
+        }
+
+        .dh h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #f0f4ff;
+        }
+
+        .det-id {
+            font-size: 10.5px;
+            color: #4a5568;
+        }
+
+        .divider {
+            border: none;
+            border-top: 1px solid #1e2332;
+            margin: 14px 0;
+        }
+
+        .df {
+            margin-bottom: 14px;
+        }
+
+        .df-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.07em;
+            color: #4a5568;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+        }
+
+        .df-val {
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+
+        .df-val a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        .det-ctrls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 18px;
+        }
+
+        .det-ctrls .ab {
+            width: auto;
+            padding: 7px 14px;
+            font-size: 12.5px;
+            font-weight: 500;
+        }
+
+        .lp {
+            background: #151822;
+            border: 1px solid #1e2332;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .lh {
+            padding: 12px 18px;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #8892a4;
+            border-bottom: 1px solid #1e2332;
+        }
+
+        .lb {
+            flex: 1;
+            padding: 14px 18px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #64d68a;
+            background: #0a0d14;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            min-height: 300px;
+        }
+
+        /* ===== TOAST ===== */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #1e2332;
+            border: 1px solid #2a3350;
+            border-radius: 9px;
+            padding: 12px 18px;
+            font-size: 13px;
+            color: #e2e8f0;
+            z-index: 9999;
+            transform: translateY(80px);
+            opacity: 0;
+            transition: all 0.25s;
+            pointer-events: none;
+            max-width: 320px;
+            font-family: inherit;
+        }
+
+        #toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        #toast.terr {
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #f87171;
+        }
+
+        #toast.tok {
+            border-color: rgba(34, 197, 94, 0.5);
+            color: #4ade80;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">E</div>
+            <div>
+                <div class="brand-name">EnvOnDemand</div>
+                <div class="brand-sub">DevOps Dashboard</div>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#dashboard" class="nav-item active" id="nav-environments">
+                <span>▣</span> Active Environments
+            </a>
+            <a href="#blueprints" class="nav-item" id="nav-blueprints">
+                <span>◈</span> Image Templates
+            </a>
+        </nav>
+
+        <div class="sidebar-section">PROJECTS</div>
+        <div id="project-list" class="project-list">
+            <div class="project-item"><span class="dot dot-g"></span> Loading...</div>
+        </div>
+
+        <div class="sidebar-user">
+            <div class="user-avatar">A</div>
+            <div>
+                <div class="user-name">Admin</div>
+                <div class="user-email">admin@example.com</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <header class="topbar">
+            <div class="page-title" id="page-title">Environments</div>
+            <div class="topbar-right">
+                <div class="search-box">
+                    <span style="color:#4a5568;font-size:12px;">🔍</span>
+                    <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
+                </div>
+                <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD -->
+        <div id="view-dashboard" class="view-container view-active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div>
+                        <div class="stat-label">Total Running</div>
+                        <div class="stat-value" id="stat-running">0</div>
+                        <div class="stat-sub">↑ 0 environments</div>
+                    </div>
+                    <div class="stat-icon si-g">✔</div>
+                </div>
+                <div class="stat-card">
+                    <div>
+                        <div class="stat-label">Deploying</div>
+                        <div class="stat-value" id="stat-pending">0</div>
+                        <div class="stat-sub">— 0 change</div>
+                    </div>
+                    <div class="stat-icon si-b">⟳</div>
+                </div>
+                <div class="stat-card">
+                    <div>
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value" id="stat-failed">0</div>
+                        <div class="stat-sub">↓ 0 less than yesterday</div>
+                    </div>
+                    <div class="stat-icon si-r">!</div>
+                </div>
+            </div>
+
+            <div class="table-card">
+                <table class="env-table">
+                    <thead>
+                        <tr>
+                            <th>ENVIRONMENT NAME</th>
+                            <th>IMAGE</th>
+                            <th>STATUS</th>
+                            <th>PORT</th>
+                            <th>ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deployment-list">
+                        <tr>
+                            <td colspan="5" class="empty-row">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="table-footer" id="table-count">Showing 0 entries</div>
+            </div>
+        </div>
+
+        <!-- CREATE -->
+        <div id="view-create" class="view-container">
+            <div class="form-card">
+                <div class="form-title">Create New Environment</div>
+                <form id="create-form">
+                    <div class="fg">
+                        <label class="fl">Project Name</label>
+                        <input type="text" name="name" class="fi" required placeholder="e.g. backend-test">
+                    </div>
+                    <div class="fg">
+                        <label class="fl">Configuration Mode</label>
+                        <div class="radio-grp">
+                            <label class="rl"><input type="radio" name="mode" value="manual" checked> Manual</label>
+                            <label class="rl"><input type="radio" name="mode" value="blueprint"> Use Blueprint</label>
+                        </div>
+                    </div>
+                    <div id="blueprint-fields" style="display:none" class="fg">
+                        <label class="fl">Select Blueprint</label>
+                        <select name="blueprint_id" id="blueprint-select" class="fi"></select>
+                    </div>
+                    <div id="manual-fields">
+                        <div class="form-row fg">
+                            <div>
+                                <label class="fl">Docker Image</label>
+                                <input type="text" name="image_tag" class="fi" value="nginx:latest">
+                            </div>
+                            <div>
+                                <label class="fl">Internal Port</label>
+                                <input type="number" name="internal_port" class="fi" value="80">
+                            </div>
+                        </div>
+                        <div class="fg">
+                            <label class="fl">Environment Variables</label>
+                            <div id="env-vars-container"></div>
+                            <button type="button" class="btn-add" onclick="addEnvVar()">+ Add Variable</button>
+                        </div>
+                    </div>
+            </div>
+            <div class="form-actions">
+                <a href="#dashboard" class="btn-cancel">Cancel</a>
+                <button type="submit" class="btn-submit">Create &amp; Launch</button>
+            </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- BLUEPRINTS -->
+    <div id="view-blueprints" class="view-container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <div style="font-size:18px;font-weight:700;color:#f0f4ff">Image Templates</div>
+            <button class="btn-create" onclick="showCreateBlueprint()">+ New Template</button>
+        </div>
+        <div class="table-card">
+            <table class="env-table">
+                <thead>
+                    <tr>
+                        <th>NAME</th>
+                        <th>IMAGE</th>
+                        <th>PORT</th>
+                        <th>ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody id="blueprint-list">
+                    <tr>
+                        <td colspan="4" class="empty-row">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- Create/Edit blueprint form (hidden by default) -->
+        <div id="create-bp-form" style="display:none;margin-top:20px">
+            <div class="form-card">
+                <div class="form-title" id="bp-form-title">New Image Template</div>
+                <form id="blueprint-form">
+                    <input type="hidden" name="bp_id" id="bp_id">
+                    <div class="fg"><label class="fl">Name</label><input type="text" name="bp_name" class="fi" required
+                            placeholder="e.g. nginx-default"></div>
+                    <div class="form-row fg">
+                        <div><label class="fl">Docker Image</label><input type="text" name="bp_image" class="fi"
+                                required value="nginx:latest"></div>
+                        <div><label class="fl">Default Port</label><input type="number" name="bp_port" class="fi"
+                                required value="80"></div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-cancel"
+                            onclick="document.getElementById('create-bp-form').style.display='none'">Cancel</button>
+                        <button type="submit" class="btn-submit" id="bp-submit-btn">Save Template</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- DETAILS -->
+    <div id="view-details" class="view-container">
+        <div class="dg">
+            <div class="dp">
+                <div class="dh">
+                    <div>
+                        <h3>Environment</h3>
+                        <code id="det-id" class="det-id"></code>
+                    </div>
+                    <span id="det-status" class="badge"></span>
+                </div>
+                <hr class="divider">
+                <div class="df">
+                    <div class="df-label">IMAGE</div>
+                    <div id="det-image" class="df-val"></div>
+                </div>
+                <div class="df">
+                    <div class="df-label">INTERNAL PORT</div>
+                    <div id="det-port" class="df-val"></div>
+                </div>
+                <div class="df">
+                    <div class="df-label">PUBLIC URL</div>
+                    <div id="det-link" class="df-val"></div>
+                </div>
+                <div id="det-controls" class="det-ctrls"></div>
+            </div>
+            <div class="lp">
+                <div class="lh">Live Logs</div>
+                <pre id="det-logs" class="lb">Waiting for logs...</pre>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <div id="toast"></div>
+    <script src="/static/js/app.js?v=9"></script>
+</body>
+
+</html>

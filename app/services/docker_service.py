@@ -1,5 +1,7 @@
 import socket
+import asyncio
 from typing import Dict, Any, Optional
+from functools import partial
 
 import docker
 from docker.errors import ImageNotFound, APIError, NotFound
@@ -21,51 +23,59 @@ class ContainerStartError(DockerServiceError):
 
 
 class DockerService:
-    """A service class to manage the lifecycle of Docker containers."""
+    """A service class to manage the lifecycle of Docker containers asynchronously."""
 
     def __init__(self):
         """
-        Initializes the Docker client from environment variables.
+        Initializes the DockerService.
+        Actual client initialization happens in __aenter__ or lazy load to avoid blocking __init__.
+        """
+        self.client = None
+
+    async def __aenter__(self):
+        """
+        Async context manager entry. Initializes the Docker client.
         Raises ConnectionError if it cannot connect to the Docker daemon.
         """
+        loop = asyncio.get_running_loop()
         try:
-            self.client = docker.from_env()
-            self.client.ping()
-        except Exception:
-            raise ConnectionError("Could not connect to the Docker daemon. Is it running?")
+            # Running client creation in executor because it might check the socket
+            self.client = await loop.run_in_executor(None, docker.from_env)
+            await loop.run_in_executor(None, self.client.ping)
+        except Exception as e:
+            raise ConnectionError(f"Could not connect to the Docker daemon. Is it running? Error: {e}")
+        return self
 
-    def _find_free_port(self) -> int:
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Async context manager exit. Closes the Docker client.
+        """
+        if self.client:
+            # client.close() is synchronous but fast, usually safe to run directly,
+            # but for strict correctness effectively we can run it in executor too.
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, self.client.close)
+            except Exception:
+                pass  # Swallow errors on close
+
+    def _find_free_port_sync(self) -> int:
         """
         Finds and returns a free port on the host machine.
-        This is done by binding a temporary socket to port 0 and checking the assigned port.
         """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return s.getsockname()[1]
 
-    def run_container(
+    def _run_container_sync(
         self,
         image_tag: str,
         internal_port: int,
-        environment: Optional[Dict[str, str]] = None,
-        cpu_limit: Optional[str] = None,
+        environment: Optional[Dict[str, str]],
+        cpu_limit: Optional[str],
     ) -> Dict[str, Any]:
         """
-        Pulls an image, finds a free host port, and runs a new container.
-
-        Args:
-            image_tag: The tag of the Docker image to run (e.g., 'postgres:15-alpine').
-            internal_port: The port inside the container to expose.
-            environment: A dictionary of environment variables to set in the container.
-            cpu_limit: A string specifying the CPU limit (e.g., "1.5").
-
-        Returns:
-            A dictionary containing the new container's ID and the external port it's mapped to.
-
-        Raises:
-            DockerImageError: If the specified image cannot be found or pulled.
-            ContainerStartError: If the container fails to start.
+        Synchronous implementation of run_container.
         """
         try:
             print(f"Pulling image: {image_tag}...")
@@ -73,19 +83,18 @@ class DockerService:
         except ImageNotFound:
             raise DockerImageError(f"Image '{image_tag}' not found.")
 
-        free_port = self._find_free_port()
+        free_port = self._find_free_port_sync()
         if not free_port:
             raise ContainerStartError("Could not find a free port on the host.")
 
         port_mapping = {f"{internal_port}/tcp": free_port}
-        
         nano_cpus = int(float(cpu_limit) * 1_000_000_000) if cpu_limit else None
 
         try:
             print(f"Starting container for image {image_tag} on port {free_port}...")
             container = self.client.containers.run(
                 image=image_tag,
-                detach=True,  # Run in the background
+                detach=True,
                 ports=port_mapping,
                 environment=environment,
                 nano_cpus=nano_cpus,
@@ -95,27 +104,75 @@ class DockerService:
         except APIError as e:
             raise ContainerStartError(f"Failed to start container for image '{image_tag}': {e}")
 
-    def stop_container(self, container_id: str) -> None:
+    async def run_container(
+        self,
+        image_tag: str,
+        internal_port: int,
+        environment: Optional[Dict[str, str]] = None,
+        cpu_limit: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Stops and removes a container by its ID.
-
-        This operation is idempotent: if the container doesn't exist, it does nothing.
-
-        Args:
-            container_id: The ID of the container to stop and remove.
+        Asynchronously runs a container.
+        """
+        if not self.client:
+            raise RuntimeError("DockerService must be used as an async context manager.")
         
-        Raises:
-            DockerServiceError: If an error occurs during container removal.
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self._run_container_sync,
+                image_tag,
+                internal_port,
+                environment,
+                cpu_limit
+            )
+        )
+
+    def _stop_container_sync(self, container_id: str) -> None:
+        """
+        Synchronous implementation of stop_container.
         """
         try:
             print(f"Attempting to stop and remove container {container_id[:12]}...")
             container = self.client.containers.get(container_id)
-            # Using force=True is equivalent to `docker stop` followed by `docker rm`.
             container.remove(force=True)
             print(f"Container {container_id[:12]} stopped and removed successfully.")
         except NotFound:
-            # If the container is already gone, we consider the operation successful.
             print(f"Container {container_id[:12]} not found. It might have been already removed.")
             pass
         except APIError as e:
             raise DockerServiceError(f"API error removing container {container_id[:12]}: {e}")
+
+    async def stop_container(self, container_id: str) -> None:
+        """
+        Asynchronously stops a container.
+        """
+        if not self.client:
+             raise RuntimeError("DockerService must be used as an async context manager.")
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, partial(self._stop_container_sync, container_id))
+
+    def _get_container_logs_sync(self, container_id: str, tail: int = 100) -> str:
+        """
+        Synchronous implementation of get_container_logs.
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            # logs returns bytes, so we decode it
+            return container.logs(tail=tail).decode("utf-8")
+        except NotFound:
+            raise DockerServiceError(f"Container {container_id} not found.")
+        except APIError as e:
+            raise DockerServiceError(f"Failed to get logs for container {container_id}: {e}")
+
+    async def get_container_logs(self, container_id: str, tail: int = 100) -> str:
+        """
+        Asynchronously retrieves logs from a container.
+        """
+        if not self.client:
+            raise RuntimeError("DockerService must be used as an async context manager.")
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(self._get_container_logs_sync, container_id, tail))

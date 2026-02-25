@@ -20,16 +20,48 @@ async def get_deployments(db: AsyncSession, skip: int = 0, limit: int = 100) -> 
     return result.scalars().all()
 
 
-async def create_deployment_from_blueprint(db: AsyncSession, *, deployment_in: DeploymentCreate, blueprint: Blueprint) -> Deployment:
-    """Create a new deployment record in the database from a blueprint."""
-    # Snapshotting configuration from blueprint to deployment
+async def create_deployment(db: AsyncSession, *, deployment_in: DeploymentCreate, blueprint: Optional[Blueprint] = None) -> Deployment:
+    """
+    Create a new deployment record in the database.
+    Can be created from a blueprint or ad-hoc.
+    If blueprint is provided, its values are used as defaults, which can be overridden by deployment_in.
+    """
+    
+    # Default values from blueprint or None
+    image_tag = blueprint.image_tag if blueprint else None
+    env_vars = blueprint.default_env_vars if blueprint else {}
+    cpu_limit = blueprint.cpu_limit if blueprint else None
+    internal_port = blueprint.default_port if blueprint else None
+    
+    # Override with provided values from input (if any)
+    if deployment_in.image_tag:
+        image_tag = deployment_in.image_tag
+    if deployment_in.env_vars:
+         # Merge env vars if blueprint exists? Or replace? 
+         # For simplicity and clarity, let's merge if both exist, but user input overwrites.
+         if blueprint:
+             env_vars = {**env_vars, **deployment_in.env_vars}
+         else:
+             env_vars = deployment_in.env_vars
+    if deployment_in.cpu_limit:
+        cpu_limit = deployment_in.cpu_limit
+    if deployment_in.internal_port:
+        internal_port = deployment_in.internal_port
+        
+    # Validation (ensure we have the minimum required)
+    if not image_tag:
+        raise ValueError("Image tag must be provided either via blueprint or ad-hoc config.")
+    if not internal_port:
+        raise ValueError("Internal port must be provided either via blueprint or ad-hoc config.")
+
+    # Snapshotting configuration from blueprint/input to deployment
     db_deployment = Deployment(
         project_id=deployment_in.project_id,
         blueprint_id=deployment_in.blueprint_id,
-        image_tag=blueprint.image_tag,
-        env_vars=blueprint.default_env_vars,
-        cpu_limit=blueprint.cpu_limit,
-        internal_port=blueprint.default_port,
+        image_tag=image_tag,
+        env_vars=env_vars,
+        cpu_limit=cpu_limit,
+        internal_port=internal_port,
         status=DeploymentStatus.PENDING  # Start with PENDING status
     )
     db.add(db_deployment)

@@ -192,3 +192,5 @@ credentials.json
 *.parquet
 data/raw/
 data/processed/
+README.md
+README.md

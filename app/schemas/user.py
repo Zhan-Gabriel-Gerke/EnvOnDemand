@@ -13,6 +13,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for creating a user (Command). Requires a password."""
     password: str
+    is_admin: bool = False
 
 
 class UserRead(UserBase):

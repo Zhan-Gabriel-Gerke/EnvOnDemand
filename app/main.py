@@ -1,31 +1,28 @@
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.api.endpoints import deployments
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from app.api.endpoints import deployments, blueprints, projects
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Context manager to handle application startup and shutdown events.
-    """
-    print("Application startup...")
-    # Here you could add logic to connect to databases, initialize resources, etc.
-    
-    yield  # The application runs while the context manager is active
-    
-    print("Application shutdown...")
-    # Here you could add logic to close connections, clean up resources, etc.
+app = FastAPI(title="EnvOnDemand API")
 
-app = FastAPI(
-    title="EnvOnDemand API",
-    description="API for on-demand environment deployments.",
-    version="0.1.0",
-    lifespan=lifespan  # Use the modern lifespan event handler
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
-@app.get("/", tags=["Root"])
-async def read_root():
-    """A simple root endpoint to confirm the API is running."""
-    return {"message": "Welcome to EnvOnDemand API"}
 
 # Include the router for deployment management
 app.include_router(deployments.router, prefix="/api", tags=["Deployments"])
+app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"])
+app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
+
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
+
+# Mount static files - must be last as it's a catch-all
+app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -21,18 +21,18 @@ from app.db.base import Base
 
 class DeploymentStatus(str, enum.Enum):
     """Enum for the status of a deployment."""
-    PENDING = "pending"
-    RUNNING = "running"
-    STOPPED = "stopped"
-    FAILED = "failed"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    STOPPED = "STOPPED"
+    FAILED = "FAILED"
 
 
 class AuditedEntityType(str, enum.Enum):
     """Enum for the types of entities that can be audited."""
-    USER = "user"
-    PROJECT = "project"
-    BLUEPRINT = "blueprint"
-    DEPLOYMENT = "deployment"
+    USER = "USER"
+    PROJECT = "PROJECT"
+    BLUEPRINT = "BLUEPRINT"
+    DEPLOYMENT = "DEPLOYMENT"
 
 
 class User(Base):
@@ -67,8 +67,8 @@ class Project(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
     # Relationships
-    owner: Mapped["User"] = relationship("User", back_populates="projects")
-    deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="project", cascade="all, delete-orphan")
+    owner: Mapped["User"] = relationship("User", back_populates="projects", lazy="selectin")
+    deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="project", cascade="all, delete-orphan", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"

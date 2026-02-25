@@ -13,11 +13,17 @@ from app.models.models import DeploymentStatus
 class DeploymentCreate(BaseModel):
     """
     Schema for creating a deployment (Command).
-    The user only specifies the project and the blueprint to use.
-    All other configuration is snapshotted by the backend from the blueprint.
+    The user can either specify a blueprint (blueprint_id) OR provide ad-hoc configuration.
+    If blueprint_id is provided, other fields can still be used to override blueprint defaults.
     """
     project_id: uuid.UUID
-    blueprint_id: uuid.UUID
+    blueprint_id: Optional[uuid.UUID] = None
+    
+    # Ad-hoc / Override fields
+    image_tag: Optional[str] = None
+    env_vars: Optional[Dict[str, Any]] = None
+    cpu_limit: Optional[str] = None
+    internal_port: Optional[int] = None
 
 
 # Query Schema (Output)

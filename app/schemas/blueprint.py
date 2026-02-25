@@ -20,6 +20,15 @@ class BlueprintCreate(BlueprintBase):
     pass
 
 
+class BlueprintUpdate(BaseModel):
+    """Schema for updating a blueprint (Command). All fields optional."""
+    name: Optional[str] = None
+    image_tag: Optional[str] = None
+    default_port: Optional[int] = None
+    default_env_vars: Optional[Dict[str, Any]] = None
+    cpu_limit: Optional[str] = None
+
+
 class BlueprintRead(BlueprintBase):
     """Schema for reading a blueprint (Query)."""
     id: uuid.UUID
