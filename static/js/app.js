@@ -35,10 +35,26 @@ function showToast(msg, type = 'ok') {
 
 // ===== API HELPER =====
 async function api(path, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    const token = localStorage.getItem('auth_token');
+
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}${path}`, {
         ...options,
-        headers: { 'Content-Type': 'application/json', ...options.headers }
+        headers: headers
     });
+
+    if (response.status === 401 || response.status === 403) {
+        if (window.location.hash !== '#login') {
+            localStorage.removeItem('auth_token');
+            window.location.hash = '#login';
+        }
+        throw new Error('Unauthorized. Please log in.');
+    }
+
     if (response.status === 204) return null;
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || `Error ${response.status}`);
@@ -52,26 +68,60 @@ function navigate() {
     const view = parts[0].substring(1);
     const id = parts[1];
 
+    // Auth guard
+    const token = localStorage.getItem('auth_token');
+    if (!token && view !== 'login') {
+        window.location.hash = '#login';
+        return;
+    }
+
     document.querySelectorAll('.view-container').forEach(el => el.classList.remove('view-active'));
     if (state.pollingInterval) { clearInterval(state.pollingInterval); state.pollingInterval = null; }
 
     // Nav highlight
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
-    if (view === 'create') {
-        document.getElementById('page-title').textContent = 'Create Environment';
-        renderCreate();
-    } else if (view === 'blueprints') {
-        document.getElementById('nav-blueprints') && document.getElementById('nav-blueprints').classList.add('active');
-        document.getElementById('page-title').textContent = 'Image Templates';
-        renderBlueprints();
-    } else if (view === 'details' && id) {
-        document.getElementById('page-title').textContent = 'Environment Details';
-        renderDetails(id);
+    const topbarRight = document.querySelector('.topbar-right');
+    const logoutBtn = document.getElementById('logout-btn');
+    const sidebar = document.getElementById('app-sidebar');
+
+    if (logoutBtn) logoutBtn.style.display = token ? 'inline-block' : 'none';
+
+    if (view === 'login') {
+        if (sidebar) sidebar.classList.add('d-none');
+        document.getElementById('page-title').textContent = 'Authentication Required';
+        topbarRight.style.display = 'none';
+        document.getElementById('view-login').classList.add('view-active');
     } else {
-        document.getElementById('nav-environments') && document.getElementById('nav-environments').classList.add('active');
-        document.getElementById('page-title').textContent = 'Environments';
-        renderDashboard();
+        if (sidebar) sidebar.classList.remove('d-none');
+
+        if (view === 'create') {
+            document.getElementById('page-title').textContent = 'Create Environment';
+            topbarRight.style.display = 'none';
+            renderCreate();
+        } else if (view === 'blueprints') {
+            document.getElementById('nav-blueprints') && document.getElementById('nav-blueprints').classList.add('active');
+            document.getElementById('page-title').textContent = 'Image Templates';
+            topbarRight.innerHTML = `<button class="btn-create" onclick="showCreateBlueprint()">+ New Template</button>`;
+            topbarRight.style.display = 'flex';
+            renderBlueprints();
+        } else if (view === 'details' && id) {
+            document.getElementById('page-title').textContent = 'Environment Details';
+            topbarRight.style.display = 'none';
+            renderDetails(id);
+        } else {
+            document.getElementById('nav-environments') && document.getElementById('nav-environments').classList.add('active');
+            document.getElementById('page-title').textContent = 'Environments';
+            topbarRight.innerHTML = `
+            <div class="search-box">
+                <span style="color:#4a5568;font-size:12px;">🔍</span>
+                <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
+            </div>
+            <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
+        `;
+            topbarRight.style.display = 'flex';
+            renderDashboard();
+        }
     }
 }
 
@@ -408,10 +458,46 @@ function addEnvVar() {
     document.getElementById('env-vars-container').appendChild(row);
 }
 
+// ===== AUTHENTICATION =====
+async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('login-submit-btn');
+    const fd = new FormData(e.target);
+    const params = new URLSearchParams();
+    params.append('username', fd.get('username'));
+    params.append('password', fd.get('password'));
+
+    try {
+        btn.textContent = 'Authenticating...';
+        btn.disabled = true;
+        const res = await api('/auth/token', {
+            method: 'POST',
+            body: params.toString(),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+        localStorage.setItem('auth_token', res.access_token);
+        showToast('Login successful', 'ok');
+        e.target.reset();
+        window.location.hash = '#dashboard';
+    } catch (err) {
+        showToast('Login failed: ' + err.message, 'error');
+    } finally {
+        btn.textContent = 'Authorize';
+        btn.disabled = false;
+    }
+}
+
+function logout() {
+    localStorage.removeItem('auth_token');
+    window.location.hash = '#login';
+    showToast('Logged out securely', 'ok');
+}
+
 // ===== INIT =====
 window.addEventListener('hashchange', navigate);
 window.addEventListener('load', () => {
     document.getElementById('create-form').addEventListener('submit', handleCreate);
     document.getElementById('blueprint-form').addEventListener('submit', handleCreateBlueprint);
+    document.getElementById('login-form').addEventListener('submit', handleLogin);
     navigate();
 });

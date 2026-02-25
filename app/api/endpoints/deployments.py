@@ -1,13 +1,14 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user, RequireRole
 from app.schemas.deployment import DeploymentRead, DeploymentCreate
 from app.crud import deployment as crud
 from app.db.session import get_db, AsyncSessionLocal
-from app.models.models import DeploymentStatus
+from app.models.models import DeploymentStatus, User
 from app.services.docker_service import DockerService, DockerServiceError
 
 router = APIRouter()
@@ -63,35 +64,55 @@ def run_deployment_task(deployment_id: uuid.UUID):
     asyncio.run(run_deployment_task_async(deployment_id))
 
 
-@router.post("/deployments", response_model=DeploymentRead, status_code=202)
+@router.post("/deployments", response_model=DeploymentRead, status_code=status.HTTP_202_ACCEPTED)
 async def create_deployment(
     deployment_in: DeploymentCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(["admin", "developer"]))
 ):
     """
-    Create a new deployment.
-    This endpoint immediately returns a 'pending' deployment and starts
-    the container creation process in the background.
+    Provisions a new deployment environment asynchronously.
+    Enforces active container quotas against the invoking user before initiating the Docker creation flow.
     """
+    # Defensive check to protect the control plane from crashing if a user record 
+    # somehow circumvented initialization hooks and lacks a quota profile.
+    if not current_user.quota:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Integrity Exception: Quota profile missing for current context."
+        )
+
+    # TODO: This quota check is prone to a race condition (TOCTOU). 
+    # Two rapid concurrent requests can bypass the limit. 
+    # Consider using PostgreSQL SELECT ... FOR UPDATE or advisory locks here in V2.
+    if current_user.quota.active_containers >= current_user.quota.max_containers:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Resource limits exhausted: {current_user.quota.active_containers}/{current_user.quota.max_containers} active containers."
+        )
+
     blueprint = None
     if deployment_in.blueprint_id:
         blueprint = await crud.get_blueprint(db, blueprint_id=deployment_in.blueprint_id)
         if not blueprint:
-            raise HTTPException(status_code=404, detail="Blueprint not found.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blueprint instance not resolved.")
 
-    # 1. Create the DB record with 'pending' status
     try:
         db_deployment = await crud.create_deployment(
             db=db, deployment_in=deployment_in, blueprint=blueprint
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # 2. Add the container creation to background tasks
+    # Optimistically claim the quota slot.
+    # TODO: The background task (run_deployment_task_async) MUST trap Docker exceptions 
+    # and decrement this value if the container fails to spin up.
+    current_user.quota.active_containers += 1
+    await db.commit()
+
     background_tasks.add_task(run_deployment_task_async, db_deployment.id)
 
-    # 3. Return the accepted deployment object immediately
     return db_deployment
 
 

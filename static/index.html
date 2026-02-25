@@ -20,6 +20,10 @@
             height: 100%;
         }
 
+        .d-none {
+            display: none !important;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
             background: #0f1117;
@@ -761,7 +765,7 @@
 <body>
 
     <!-- SIDEBAR -->
-    <aside class="sidebar">
+    <aside class="sidebar d-none" id="app-sidebar">
         <div class="sidebar-brand">
             <div class="brand-icon">E</div>
             <div>
@@ -796,16 +800,44 @@
     <!-- MAIN -->
     <div class="main">
 
-        <header class="topbar">
+        <header class="topbar" id="app-topbar">
             <div class="page-title" id="page-title">Environments</div>
-            <div class="topbar-right">
+            <div class="topbar-right" id="topbar-right">
                 <div class="search-box">
                     <span style="color:#4a5568;font-size:12px;">🔍</span>
                     <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
                 </div>
                 <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
+                <button class="action-btn btn-danger" id="logout-btn"
+                    style="display:none;padding:8px 16px;font-size:13px;border-radius:6px;margin-left:8px;"
+                    onclick="logout()" title="Secure Logout">Logout</button>
             </div>
         </header>
+
+        <!-- LOGIN -->
+        <div id="view-login" class="view-container">
+            <div style="max-width: 400px; margin: 60px auto;">
+                <div class="form-card">
+                    <div class="form-title" style="text-align: center; margin-bottom: 30px;">
+                        🔑 Secure Login
+                    </div>
+                    <form id="login-form">
+                        <div class="fg">
+                            <label class="fl">Username</label>
+                            <input type="text" name="username" class="fi" required placeholder="admin">
+                        </div>
+                        <div class="fg">
+                            <label class="fl">Password</label>
+                            <input type="password" name="password" class="fi" required placeholder="••••••••">
+                        </div>
+                        <div class="form-actions" style="margin-top: 30px;">
+                            <button type="submit" class="btn-submit" style="width: 100%"
+                                id="login-submit-btn">Authorize</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
 
         <!-- DASHBOARD -->
         <div id="view-dashboard" class="view-container view-active">
@@ -894,99 +926,94 @@
                             <button type="button" class="btn-add" onclick="addEnvVar()">+ Add Variable</button>
                         </div>
                     </div>
-            </div>
-            <div class="form-actions">
-                <a href="#dashboard" class="btn-cancel">Cancel</a>
-                <button type="submit" class="btn-submit">Create &amp; Launch</button>
-            </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- BLUEPRINTS -->
-    <div id="view-blueprints" class="view-container">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-            <div style="font-size:18px;font-weight:700;color:#f0f4ff">Image Templates</div>
-            <button class="btn-create" onclick="showCreateBlueprint()">+ New Template</button>
-        </div>
-        <div class="table-card">
-            <table class="env-table">
-                <thead>
-                    <tr>
-                        <th>NAME</th>
-                        <th>IMAGE</th>
-                        <th>PORT</th>
-                        <th>ACTIONS</th>
-                    </tr>
-                </thead>
-                <tbody id="blueprint-list">
-                    <tr>
-                        <td colspan="4" class="empty-row">Loading...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-        <!-- Create/Edit blueprint form (hidden by default) -->
-        <div id="create-bp-form" style="display:none;margin-top:20px">
-            <div class="form-card">
-                <div class="form-title" id="bp-form-title">New Image Template</div>
-                <form id="blueprint-form">
-                    <input type="hidden" name="bp_id" id="bp_id">
-                    <div class="fg"><label class="fl">Name</label><input type="text" name="bp_name" class="fi" required
-                            placeholder="e.g. nginx-default"></div>
-                    <div class="form-row fg">
-                        <div><label class="fl">Docker Image</label><input type="text" name="bp_image" class="fi"
-                                required value="nginx:latest"></div>
-                        <div><label class="fl">Default Port</label><input type="number" name="bp_port" class="fi"
-                                required value="80"></div>
-                    </div>
                     <div class="form-actions">
-                        <button type="button" class="btn-cancel"
-                            onclick="document.getElementById('create-bp-form').style.display='none'">Cancel</button>
-                        <button type="submit" class="btn-submit" id="bp-submit-btn">Save Template</button>
+                        <a href="#dashboard" class="btn-cancel">Cancel</a>
+                        <button type="submit" class="btn-submit">Create &amp; Launch</button>
                     </div>
                 </form>
             </div>
         </div>
-    </div>
 
-    <!-- DETAILS -->
-    <div id="view-details" class="view-container">
-        <div class="dg">
-            <div class="dp">
-                <div class="dh">
-                    <div>
-                        <h3>Environment</h3>
-                        <code id="det-id" class="det-id"></code>
-                    </div>
-                    <span id="det-status" class="badge"></span>
-                </div>
-                <hr class="divider">
-                <div class="df">
-                    <div class="df-label">IMAGE</div>
-                    <div id="det-image" class="df-val"></div>
-                </div>
-                <div class="df">
-                    <div class="df-label">INTERNAL PORT</div>
-                    <div id="det-port" class="df-val"></div>
-                </div>
-                <div class="df">
-                    <div class="df-label">PUBLIC URL</div>
-                    <div id="det-link" class="df-val"></div>
-                </div>
-                <div id="det-controls" class="det-ctrls"></div>
+        <!-- BLUEPRINTS -->
+        <div id="view-blueprints" class="view-container">
+            <div class="table-card">
+                <table class="env-table">
+                    <thead>
+                        <tr>
+                            <th>NAME</th>
+                            <th>IMAGE</th>
+                            <th>PORT</th>
+                            <th>ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blueprint-list">
+                        <tr>
+                            <td colspan="4" class="empty-row">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-            <div class="lp">
-                <div class="lh">Live Logs</div>
-                <pre id="det-logs" class="lb">Waiting for logs...</pre>
+            <!-- Create/Edit blueprint form (hidden by default) -->
+            <div id="create-bp-form" style="display:none;margin-top:20px">
+                <div class="form-card">
+                    <div class="form-title" id="bp-form-title">New Image Template</div>
+                    <form id="blueprint-form">
+                        <input type="hidden" name="bp_id" id="bp_id">
+                        <div class="fg"><label class="fl">Name</label><input type="text" name="bp_name" class="fi"
+                                required placeholder="e.g. nginx-default"></div>
+                        <div class="form-row fg">
+                            <div><label class="fl">Docker Image</label><input type="text" name="bp_image" class="fi"
+                                    required value="nginx:latest"></div>
+                            <div><label class="fl">Default Port</label><input type="number" name="bp_port" class="fi"
+                                    required value="80"></div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn-cancel"
+                                onclick="document.getElementById('create-bp-form').style.display='none'">Cancel</button>
+                            <button type="submit" class="btn-submit" id="bp-submit-btn">Save Template</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
-    </div>
+
+        <!-- DETAILS -->
+        <div id="view-details" class="view-container">
+            <div class="dg">
+                <div class="dp">
+                    <div class="dh">
+                        <div>
+                            <h3>Environment</h3>
+                            <code id="det-id" class="det-id"></code>
+                        </div>
+                        <span id="det-status" class="badge"></span>
+                    </div>
+                    <hr class="divider">
+                    <div class="df">
+                        <div class="df-label">IMAGE</div>
+                        <div id="det-image" class="df-val"></div>
+                    </div>
+                    <div class="df">
+                        <div class="df-label">INTERNAL PORT</div>
+                        <div id="det-port" class="df-val"></div>
+                    </div>
+                    <div class="df">
+                        <div class="df-label">PUBLIC URL</div>
+                        <div id="det-link" class="df-val"></div>
+                    </div>
+                    <div id="det-controls" class="det-ctrls"></div>
+                </div>
+                <div class="lp">
+                    <div class="lh">Live Logs</div>
+                    <pre id="det-logs" class="lb">Waiting for logs...</pre>
+                </div>
+            </div>
+        </div>
 
     </div>
 
     <div id="toast"></div>
-    <script src="/static/js/app.js?v=9"></script>
+    <script src="/static/js/app.js?v=17"></script>
 </body>
 
 </html>

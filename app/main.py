@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from app.api.endpoints import deployments, blueprints, projects
+from app.api.endpoints import deployments, blueprints, projects, auth
+from app.api.deps import get_current_user
 
 app = FastAPI(title="EnvOnDemand API")
 
@@ -16,13 +17,17 @@ app.add_middleware(
 )
 
 # Include the router for deployment management
-app.include_router(deployments.router, prefix="/api", tags=["Deployments"])
-app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"])
-app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
+app.include_router(deployments.router, prefix="/api", tags=["Deployments"], dependencies=[Depends(get_current_user)])
+app.include_router(blueprints.router, prefix="/api/blueprints", tags=["Blueprints"], dependencies=[Depends(get_current_user)])
+app.include_router(projects.router, prefix="/api/projects", tags=["Projects"], dependencies=[Depends(get_current_user)])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 
 @app.get("/")
 def read_index():
-    return FileResponse("static/index.html")
+    return FileResponse(
+        "static/index.html", 
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 # Mount static files - must be last as it's a catch-all
 app.mount("/static", StaticFiles(directory="static"), name="static")

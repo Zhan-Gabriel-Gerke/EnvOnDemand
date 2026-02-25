@@ -35,22 +35,60 @@ class AuditedEntityType(str, enum.Enum):
     DEPLOYMENT = "DEPLOYMENT"
 
 
+class Role(Base):
+    """
+    Defines system access levels (admin, developer, viewer).
+    Decoupled from User to support dynamic permission assignments without schema migrations.
+    """
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+
+    users: Mapped[List["User"]] = relationship("User", back_populates="role")
+
+
 class User(Base):
-    """Represents a user of the system."""
+    """Represents an application user identity."""
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String)
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"), index=True)
 
     # Relationships
+    role: Mapped["Role"] = relationship("Role", back_populates="users", lazy="selectin")
+    quota: Mapped["UserQuota"] = relationship(
+        "UserQuota", 
+        back_populates="user", 
+        uselist=False, 
+        cascade="all, delete-orphan", 
+        lazy="selectin"
+    )
     projects: Mapped[List["Project"]] = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
     audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username='{self.username}')>"
+
+
+class UserQuota(Base):
+    """
+    Tracks resource limits per user to prevent noisy-neighbor problems and resource exhaustion 
+    on the underlying Docker daemon.
+    """
+    __tablename__ = "user_quotas"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    
+    max_containers: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
+    active_containers: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    user: Mapped["User"] = relationship("User", back_populates="quota")
 
 
 class Project(Base):
