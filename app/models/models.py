@@ -27,6 +27,14 @@ class DeploymentStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class ContainerStatus(str, enum.Enum):
+    """Enum for the status of a specific container."""
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    EXITED = "EXITED"
+    FAILED = "FAILED"
+
+
 class AuditedEntityType(str, enum.Enum):
     """Enum for the types of entities that can be audited."""
     USER = "USER"
@@ -69,6 +77,7 @@ class User(Base):
         lazy="selectin"
     )
     projects: Mapped[List["Project"]] = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
+    deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
@@ -106,7 +115,6 @@ class Project(Base):
 
     # Relationships
     owner: Mapped["User"] = relationship("User", back_populates="projects", lazy="selectin")
-    deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="project", cascade="all, delete-orphan", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}')>"
@@ -123,9 +131,7 @@ class Blueprint(Base):
     default_env_vars: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     cpu_limit: Mapped[Optional[str]] = mapped_column(String(50))
 
-    # This relationship is for viewing which deployments were created from this blueprint,
-    # but the deployment itself holds the canonical configuration.
-    deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="blueprint")
+    cpu_limit: Mapped[Optional[str]] = mapped_column(String(50))
 
     def __repr__(self) -> str:
         return f"<Blueprint(id={self.id}, name='{self.name}', image_tag='{self.image_tag}')>"
@@ -133,42 +139,57 @@ class Blueprint(Base):
 
 class Deployment(Base):
     """
-    Represents a running or stopped container instance.
-    It contains a snapshot of the configuration from its Blueprint at the time of creation.
+    Represents a multi-container environment (like a docker-compose project).
     """
     __tablename__ = "deployments"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
-    # --- Snapshot of Blueprint configuration ---
-    image_tag: Mapped[str] = mapped_column(String(255))
-    env_vars: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
-    cpu_limit: Mapped[Optional[str]] = mapped_column(String(50))
-    # --- End of Snapshot ---
-
     status: Mapped[DeploymentStatus] = mapped_column(
         SQLAlchemyEnum(DeploymentStatus, name="deployment_status_enum"),
         default=DeploymentStatus.PENDING,
         server_default=DeploymentStatus.PENDING.value,
         index=True
     )
-    container_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
-    internal_port: Mapped[int] = mapped_column(Integer)
-    external_port: Mapped[Optional[int]] = mapped_column(Integer, unique=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    network_name: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    # Foreign Keys
-    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    # The blueprint_id is kept for reference, but if the blueprint is deleted, the deployment should remain.
-    blueprint_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("blueprints.id", ondelete="SET NULL"), index=True)
-
     # Relationships
-    project: Mapped["Project"] = relationship("Project", back_populates="deployments")
-    # This relationship is for reference. It can be nullable if the original blueprint is deleted.
-    blueprint: Mapped[Optional["Blueprint"]] = relationship("Blueprint", back_populates="deployments")
+    user: Mapped["User"] = relationship("User", back_populates="deployments")
+    containers: Mapped[List["DeploymentContainer"]] = relationship(
+        "DeploymentContainer",
+        back_populates="deployment",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
-        return f"<Deployment(id={self.id}, status='{self.status.value}', image_tag='{self.image_tag}')>"
+        return f"<Deployment(id={self.id}, network_name='{self.network_name}', status='{self.status.value}')>"
+
+
+class DeploymentContainer(Base):
+    """
+    Represents a specific container inside a multi-container environment.
+    """
+    __tablename__ = "deployment_containers"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    deployment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"), index=True)
+    container_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)  # Docker Engine container ID
+    name: Mapped[str] = mapped_column(String(255))         # E.g., 'postgres_db_1'
+    image: Mapped[str] = mapped_column(String(255))        # E.g., 'postgres:15-alpine'
+    role: Mapped[str] = mapped_column(String(50))          # E.g., 'db', 'backend'
+    status: Mapped[ContainerStatus] = mapped_column(
+        SQLAlchemyEnum(ContainerStatus, name="container_status_enum"),
+        default=ContainerStatus.PENDING,
+        server_default=ContainerStatus.PENDING.value,
+        index=True
+    )
+
+    # Relationships
+    deployment: Mapped["Deployment"] = relationship("Deployment", back_populates="containers")
+
+    def __repr__(self) -> str:
+        return f"<DeploymentContainer(name='{self.name}', role='{self.role}', status='{self.status.value}')>"
 
 
 class AuditLog(Base):
