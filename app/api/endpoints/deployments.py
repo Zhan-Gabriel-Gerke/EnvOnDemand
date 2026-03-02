@@ -64,56 +64,39 @@ def run_deployment_task(deployment_id: uuid.UUID):
     asyncio.run(run_deployment_task_async(deployment_id))
 
 
-@router.post("/deployments", response_model=DeploymentRead, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/deployments", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
 async def create_deployment(
     deployment_in: DeploymentCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(RequireRole(["admin", "developer"]))
 ):
     """
-    Provisions a new deployment environment asynchronously.
-    Enforces active container quotas against the invoking user before initiating the Docker creation flow.
+    [DRAFT] Provisions a new multi-container deployment environment synchronously.
+    Accepts DeploymentCreate payload containing network_name and a list of containers.
     """
-    # Defensive check to protect the control plane from crashing if a user record 
-    # somehow circumvented initialization hooks and lacks a quota profile.
+    # 1. Quota check (draft example)
     if not current_user.quota:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Integrity Exception: Quota profile missing for current context."
         )
 
-    # TODO: This quota check is prone to a race condition (TOCTOU). 
-    # Two rapid concurrent requests can bypass the limit. 
-    # Consider using PostgreSQL SELECT ... FOR UPDATE or advisory locks here in V2.
     if current_user.quota.active_containers >= current_user.quota.max_containers:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Resource limits exhausted: {current_user.quota.active_containers}/{current_user.quota.max_containers} active containers."
         )
 
-    blueprint = None
-    if deployment_in.blueprint_id:
-        blueprint = await crud.get_blueprint(db, blueprint_id=deployment_in.blueprint_id)
-        if not blueprint:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blueprint instance not resolved.")
-
-    try:
-        db_deployment = await crud.create_deployment(
-            db=db, deployment_in=deployment_in, blueprint=blueprint
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-    # Optimistically claim the quota slot.
-    # TODO: The background task (run_deployment_task_async) MUST trap Docker exceptions 
-    # and decrement this value if the container fails to spin up.
-    current_user.quota.active_containers += 1
-    await db.commit()
-
-    background_tasks.add_task(run_deployment_task_async, db_deployment.id)
-
-    return db_deployment
+    # In a real implementation we would save the Deployment and its containers to DB here
+    # db_deployment = await crud.create_multi_container_deployment(db, current_user.id, deployment_in)
+    
+    # Return what was received to demonstrate validation works
+    return {
+        "message": "Deployment payload accepted (draft mode)",
+        "network_name": deployment_in.network_name,
+        "containers_count": len(deployment_in.containers),
+        "containers": [c.model_dump() for c in deployment_in.containers]
+    }
 
 
 @router.get("/deployments", response_model=List[DeploymentRead])
