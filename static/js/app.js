@@ -168,24 +168,30 @@ async function renderDashboard() {
             tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No environments found. Click "+ Create New Environment" to get started.</td></tr>';
         } else {
             tbody.innerHTML = deployments.map(d => {
-                const projectName = projectMap[d.project_id] || d.image_tag.split(':')[0];
-                const containerId = d.container_id ? d.container_id.substring(0, 12) : d.id.substring(0, 8);
+                // New model: network_name, containers[], user_id — no image_tag / project_id
+                const envName = d.network_name || d.id.substring(0, 8);
+                const imagesSummary = (d.containers || []).map(c => {
+                    const img = c.image || '';
+                    // Strip 'git:' prefix for display
+                    return img.startsWith('git:') ? '🔧 ' + c.role : img;
+                }).join(', ') || '—';
+                const containerCount = (d.containers || []).length;
                 const statusKey = (d.status || '').toUpperCase();
                 return `
                 <tr>
                     <td>
-                        <div class="env-name">${projectName}</div>
-                        <div class="env-id">ID: ${containerId}</div>
+                        <div class="env-name">${envName}</div>
+                        <div class="env-id">ID: ${d.id.substring(0, 8)} &middot; ${containerCount} container${containerCount !== 1 ? 's' : ''}</div>
                     </td>
-                    <td style="color:#94a3b8;font-size:13px;">${d.image_tag}</td>
+                    <td style="color:#94a3b8;font-size:13px;">${imagesSummary}</td>
                     <td><span class="badge badge-${d.status}">${d.status}</span></td>
-                    <td style="font-size:13px;color:#94a3b8;">${d.external_port ? ':' + d.external_port : '\u2014'}</td>
+                    <td style="font-size:13px;color:#94a3b8;">&mdash;</td>
                     <td>
                         <div class="actions">
                             <a href="#details/${d.id}" class="ab" title="Manage">&#128203;</a>
                             ${statusKey === 'STOPPED' ? `<button class="ab" onclick="handleAction('${d.id}','start')" title="Start">&#9654;</button>` : ''}
                             ${statusKey === 'RUNNING' ? `<button class="ab" onclick="handleAction('${d.id}','stop')" title="Stop">&#9209;</button>` : ''}
-                            <button class="ab del" onclick="handleDelete('${d.id}','${d.project_id}')" title="Delete">&#128465;</button>
+                            <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete">&#128465;</button>
                         </div>
                     </td>
                 </tr>`;
@@ -315,20 +321,19 @@ async function renderCreate() {
     document.getElementById('create-form').reset();
     document.getElementById('env-vars-container').innerHTML = '';
 
-    try {
-        const blueprints = await api('/blueprints');
-        const select = document.getElementById('blueprint-select');
-        select.innerHTML = '<option value="" disabled selected>Select a blueprint...</option>' +
-            blueprints.map(bp => `<option value="${bp.id}">${bp.name} (${bp.image_tag})</option>`).join('');
-    } catch (e) {
-        console.warn('Could not load blueprints', e);
-    }
+    // Restore default visibility on reset
+    document.getElementById('source-image-fields').style.display = 'block';
+    document.getElementById('source-git-fields').style.display = 'none';
 
-    // Mode toggle
-    document.getElementsByName('mode').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            document.getElementById('blueprint-fields').style.display = e.target.value === 'blueprint' ? 'block' : 'none';
-            document.getElementById('manual-fields').style.display = e.target.value === 'manual' ? 'block' : 'none';
+    // Wire up source-type toggle
+    document.querySelectorAll('input[name="source_type"]').forEach(radio => {
+        // Remove stale listeners by cloning
+        const fresh = radio.cloneNode(true);
+        radio.parentNode.replaceChild(fresh, radio);
+        fresh.addEventListener('change', () => {
+            const isGit = fresh.value === 'git';
+            document.getElementById('source-image-fields').style.display = isGit ? 'none' : 'block';
+            document.getElementById('source-git-fields').style.display = isGit ? 'block' : 'none';
         });
     });
 }
@@ -347,24 +352,44 @@ async function renderDetails(id) {
             const statusEl = document.getElementById('det-status');
             statusEl.textContent = d.status;
             statusEl.className = `status-badge badge-${d.status}`;
-            document.getElementById('det-image').textContent = d.image_tag;
-            document.getElementById('det-port').textContent = d.internal_port;
 
+            // New model: show network_name and container list instead of image_tag/port
+            const envName = d.network_name || d.id.substring(0, 8);
+            if (document.getElementById('det-image')) {
+                document.getElementById('det-image').textContent = envName;
+            }
+            if (document.getElementById('det-port')) {
+                const containers = d.containers || [];
+                document.getElementById('det-port').textContent =
+                    containers.map(c => `${c.role}: ${c.image} (${c.status})`).join(' | ') || '—';
+            }
+
+            // Build Public URL from host_port of the app/frontend container
             const link = document.getElementById('det-link');
-            link.innerHTML = d.external_port
-                ? `<a href="http://localhost:${d.external_port}" target="_blank">http://localhost:${d.external_port}</a>`
-                : 'N/A';
-
-            const statusKey = (d.status || '').toUpperCase();
-            document.getElementById('det-controls').innerHTML = `
-                ${statusKey === 'RUNNING' ? `<button class="action-btn btn-stop" onclick="handleAction('${d.id}','stop')">⏹ Stop</button>` : ''}
-                ${statusKey === 'STOPPED' ? `<button class="action-btn btn-start" onclick="handleAction('${d.id}','start')">▶ Start</button>` : ''}
-                <button class="action-btn btn-delete" onclick="handleDelete('${d.id}', true)">🗑 Delete</button>
-            `;
+            if (link) {
+                const appContainer = (d.containers || []).find(c =>
+                    c.host_port && ['frontend', 'app', 'backend', 'web'].includes(c.role)
+                ) || (d.containers || []).find(c => c.host_port);
+                if (appContainer && appContainer.host_port) {
+                    link.innerHTML = `<a href="http://localhost:${appContainer.host_port}" target="_blank">http://localhost:${appContainer.host_port}</a>`;
+                } else {
+                    link.innerHTML = 'Pending...';
+                }
+            }
 
             try {
                 const logsRes = await api(`/deployments/${id}/logs?tail=100`);
-                document.getElementById('det-logs').textContent = logsRes.logs || 'No logs yet...';
+                // logsRes.logs is a dict: { containerName: "log text", ... }
+                const logsData = logsRes.logs;
+                let logsText = '';
+                if (typeof logsData === 'string') {
+                    logsText = logsData;
+                } else if (logsData && typeof logsData === 'object') {
+                    logsText = Object.entries(logsData)
+                        .map(([name, text]) => `=== ${name} ===\n${text}`)
+                        .join('\n\n');
+                }
+                document.getElementById('det-logs').textContent = logsText || 'No logs yet...';
             } catch { /* no logs yet */ }
 
         } catch (e) {
@@ -379,37 +404,66 @@ async function renderDetails(id) {
 // ===== ACTIONS =====
 async function handleCreate(e) {
     e.preventDefault();
-    const formData = new FormData(e.target);
-    const mode = formData.get('mode');
+    const fd = new FormData(e.target);
+    const btn = document.getElementById('create-submit-btn');
+
+    // Collect env vars
+    const envObj = {};
+    document.getElementsByName('env_key[]').forEach((keyEl, i) => {
+        const valEl = document.getElementsByName('env_val[]')[i];
+        if (keyEl.value.trim()) envObj[keyEl.value.trim()] = valEl ? valEl.value : '';
+    });
+
+    // Determine source: image or git_url
+    const sourceType = fd.get('source_type');         // 'image' | 'git'
+    const containerName = (fd.get('container_name') || '').trim();
+    const role = (fd.get('role') || 'app').trim();
+
+    let containerSpec;
+    if (sourceType === 'git') {
+        const gitUrl = (fd.get('git_url') || '').trim();
+        if (!gitUrl) { showToast('Git URL is required', 'error'); return; }
+        const port = parseInt(fd.get('git_internal_port') || '80', 10);
+        containerSpec = {
+            name: containerName,
+            role: role,
+            git_url: gitUrl,
+            ports: { [port]: port },   // { host_port: container_port }
+            env_vars: envObj,
+        };
+    } else {
+        const imageTag = (fd.get('image_tag') || '').trim();
+        if (!imageTag) { showToast('Docker image tag is required', 'error'); return; }
+        const port = parseInt(fd.get('internal_port') || '80', 10);
+        containerSpec = {
+            name: containerName,
+            role: role,
+            image: imageTag,
+            ports: { [port]: port },
+            env_vars: envObj,
+        };
+    }
+
+    // Build the DeploymentCreate payload
+    const networkName = (fd.get('network_name') || '').trim() || undefined;
+    const payload = {
+        ...(networkName ? { network_name: networkName } : {}),
+        containers: [containerSpec],
+    };
 
     try {
-        const project = await api('/projects', {
-            method: 'POST',
-            body: JSON.stringify({ name: formData.get('name') })
-        });
+        btn.textContent = 'Launching…';
+        btn.disabled = true;
 
-        const deployPayload = { project_id: project.id };
-
-        if (mode === 'blueprint') {
-            deployPayload.blueprint_id = formData.get('blueprint_id');
-        } else {
-            deployPayload.image_tag = formData.get('image_tag');
-            deployPayload.internal_port = parseInt(formData.get('internal_port'));
-            const envKeys = document.getElementsByName('env_key[]');
-            const envVals = document.getElementsByName('env_val[]');
-            const envObj = {};
-            for (let i = 0; i < envKeys.length; i++) {
-                if (envKeys[i].value) envObj[envKeys[i].value] = envVals[i].value;
-            }
-            deployPayload.env_vars = envObj;
-        }
-
-        await api('/deployments', { method: 'POST', body: JSON.stringify(deployPayload) });
-        showToast('Environment launching!', 'ok');
+        await api('/deployments', { method: 'POST', body: JSON.stringify(payload) });
+        showToast('Environment queued — launching in background!', 'ok');
         window.location.hash = '#dashboard';
 
-    } catch (e) {
-        showToast('Creation failed: ' + e.message, 'error');
+    } catch (err) {
+        showToast('Creation failed: ' + err.message, 'error');
+    } finally {
+        btn.textContent = 'Create & Launch';
+        btn.disabled = false;
     }
 }
 
@@ -449,14 +503,58 @@ async function handleDelete(id, projectId = null, redirect = false) {
 
 function addEnvVar() {
     const row = document.createElement('div');
-    row.className = 'env-var-row';
+    row.className = 'ev-row';
     row.innerHTML = `
-        <input type="text" name="env_key[]" class="form-input" placeholder="KEY">
-        <input type="text" name="env_val[]" class="form-input" placeholder="VALUE">
-        <button type="button" class="action-btn danger" onclick="this.parentElement.remove()" title="Remove">✕</button>
+        <input type="text" name="env_key[]" class="fi" placeholder="KEY">
+        <input type="text" name="env_val[]" class="fi" placeholder="VALUE">
+        <button type="button" class="ab" onclick="this.parentElement.remove()" title="Remove" style="color:#f87171;">✕</button>
     `;
     document.getElementById('env-vars-container').appendChild(row);
 }
+
+function parseBulkEnv() {
+    const textarea = document.getElementById('bulk-env-paste');
+    if (!textarea) return;
+
+    const raw = textarea.value;
+    if (!raw.trim()) return;
+
+    const lines = raw.split('\n');
+    let added = 0;
+
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        // Skip blank lines and comments
+        if (!trimmed || trimmed.startsWith('#')) return;
+
+        // Split only on the FIRST '=' so values like BASE64=abc=def= work correctly
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) return;  // no '=' found — skip malformed line
+
+        const key = trimmed.slice(0, eqIdx).trim();
+        const value = trimmed.slice(eqIdx + 1).trim();
+
+        if (!key) return;
+
+        addEnvVar();
+        added++;
+
+        // Fill the row that was just appended
+        const container = document.getElementById('env-vars-container');
+        const rows = container.querySelectorAll('.ev-row');
+        const lastRow = rows[rows.length - 1];
+        lastRow.querySelector('[name="env_key[]"]').value = key;
+        lastRow.querySelector('[name="env_val[]"]').value = value;
+    });
+
+    if (added > 0) {
+        textarea.value = '';
+        showToast(`Parsed ${added} variable${added === 1 ? '' : 's'} from .env`, 'ok');
+    } else {
+        showToast('No valid KEY=VALUE pairs found', 'error');
+    }
+}
+
 
 // ===== AUTHENTICATION =====
 async function handleLogin(e) {
@@ -499,5 +597,15 @@ window.addEventListener('load', () => {
     document.getElementById('create-form').addEventListener('submit', handleCreate);
     document.getElementById('blueprint-form').addEventListener('submit', handleCreateBlueprint);
     document.getElementById('login-form').addEventListener('submit', handleLogin);
+
+    // Bulk env-paste: fire on paste (Ctrl+V) and on input (drag-drop / programmatic)
+    // Use setTimeout so the textarea value is already updated when paste fires.
+    const bulkArea = document.getElementById('bulk-env-paste');
+    if (bulkArea) {
+        bulkArea.addEventListener('paste', () => setTimeout(parseBulkEnv, 0));
+        bulkArea.addEventListener('input', () => { if (bulkArea.value.includes('\n')) parseBulkEnv(); });
+    }
+
     navigate();
 });
+

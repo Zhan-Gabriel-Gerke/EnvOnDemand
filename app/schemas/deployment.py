@@ -2,19 +2,53 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.models.models import DeploymentStatus, ContainerStatus
 
 
 # --- Container Schemas ---
 
 class DeploymentContainerCreate(BaseModel):
-    """Schema for a single container inside a deployment."""
-    name: str = Field(..., description="Name of the container, e.g., 'db' or 'backend'")
-    image: str = Field(..., description="Docker image tag, e.g., 'postgres:15-alpine'")
-    role: str = Field(..., description="Role of the container, e.g., 'database', 'api'")
-    env_vars: Optional[Dict[str, str]] = Field(default_factory=dict, description="Environment variables for the container")
-    ports: Optional[Dict[int, int]] = Field(default=None, description="Port mappings: host_port -> container_port")
+    """
+    Schema for a single container inside a deployment.
+
+    Exactly one of ``image`` or ``git_url`` must be provided:
+    - ``image``: pull a pre-built Docker image from a registry.
+    - ``git_url``: clone the repository and build the image on-the-fly.
+    """
+    name: str = Field(..., description="Container name, e.g. 'backend' or 'db'")
+    role: str = Field(..., description="Role of the container, e.g. 'api', 'database'")
+
+    # Source — exactly one must be set (validated below)
+    image: Optional[str] = Field(
+        default=None,
+        description="Docker image tag, e.g. 'postgres:15-alpine'. Mutually exclusive with git_url.",
+    )
+    git_url: Optional[str] = Field(
+        default=None,
+        description="Git repository URL to clone and build. Mutually exclusive with image.",
+    )
+
+    env_vars: Optional[Dict[str, str]] = Field(
+        default_factory=dict,
+        description="Environment variables injected into the container",
+    )
+    ports: Optional[Dict[int, int]] = Field(
+        default=None,
+        description="Port mappings: {host_port: container_port}",
+    )
+
+    @model_validator(mode="after")
+    def check_image_or_git_url(self) -> "DeploymentContainerCreate":
+        """Ensure exactly one source (image XOR git_url) is provided."""
+        has_image = bool(self.image)
+        has_git = bool(self.git_url)
+        if has_image == has_git:  # both set or neither set
+            raise ValueError(
+                "Provide exactly one source: either 'image' or 'git_url', not both (or neither)."
+            )
+        return self
+
 
 class DeploymentContainerRead(BaseModel):
     id: uuid.UUID
@@ -22,6 +56,7 @@ class DeploymentContainerRead(BaseModel):
     name: str
     image: str
     role: str
+    host_port: Optional[int] = None
     status: ContainerStatus
 
     model_config = ConfigDict(from_attributes=True)
@@ -31,24 +66,29 @@ class DeploymentContainerRead(BaseModel):
 
 class DeploymentCreate(BaseModel):
     """
-    Schema for creating a deployment (Command).
-    Expects a network name and a list of containers to deploy.
+    Schema for creating a multi-container deployment environment.
+    Expects an optional network name and a list of container specs.
     """
-    network_name: Optional[str] = Field(None, description="Optional custom network name")
-    containers: List[DeploymentContainerCreate] = Field(..., description="List of containers to deploy in this environment")
+    network_name: Optional[str] = Field(
+        default=None,
+        description="Custom Docker network name. Auto-generated if not provided.",
+    )
+    containers: List[DeploymentContainerCreate] = Field(
+        ...,
+        description="List of containers to deploy in this environment (min 1)",
+    )
 
-    @field_validator('containers')
+    @field_validator("containers")
     @classmethod
     def check_containers_not_empty(cls, v: List[DeploymentContainerCreate]) -> List[DeploymentContainerCreate]:
         if not v:
-            raise ValueError('A deployment must contain at least one container.')
+            raise ValueError("A deployment must contain at least one container.")
         return v
 
 
 class DeploymentRead(BaseModel):
     """
-    Schema for reading a deployment (Query).
-    Returns the full state of the deployment and its containers.
+    Schema for reading a deployment including all its containers.
     """
     id: uuid.UUID
     user_id: uuid.UUID

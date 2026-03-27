@@ -159,7 +159,8 @@ class Deployment(Base):
     containers: Mapped[List["DeploymentContainer"]] = relationship(
         "DeploymentContainer",
         back_populates="deployment",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        lazy="selectin"
     )
 
     def __repr__(self) -> str:
@@ -178,6 +179,7 @@ class DeploymentContainer(Base):
     name: Mapped[str] = mapped_column(String(255))         # E.g., 'postgres_db_1'
     image: Mapped[str] = mapped_column(String(255))        # E.g., 'postgres:15-alpine'
     role: Mapped[str] = mapped_column(String(50))          # E.g., 'db', 'backend'
+    host_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Host-side port assigned by Docker
     status: Mapped[ContainerStatus] = mapped_column(
         SQLAlchemyEnum(ContainerStatus, name="container_status_enum"),
         default=ContainerStatus.PENDING,

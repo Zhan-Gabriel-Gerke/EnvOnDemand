@@ -457,7 +457,7 @@
             justify-content: center;
             font-size: 13px;
             text-decoration: none;
-            transition: all 0.15s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             font-family: inherit;
         }
 
@@ -690,9 +690,43 @@
 
         .det-ctrls .ab {
             width: auto;
-            padding: 7px 14px;
-            font-size: 12.5px;
-            font-weight: 500;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            gap: 8px;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #22c55e, #15803d);
+        }
+
+        .btn-start:hover {
+            background: linear-gradient(135deg, #4ade80, #22c55e) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(34, 197, 94, 0.3);
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #f59e0b, #b45309);
+        }
+
+        .btn-stop:hover {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-delete {
+            background: linear-gradient(135deg, #ef4444, #b91c1c);
+        }
+
+        .btn-delete:hover {
+            background: linear-gradient(135deg, #f87171, #ef4444) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3);
         }
 
         .lp {
@@ -894,45 +928,102 @@
             <div class="form-card">
                 <div class="form-title">Create New Environment</div>
                 <form id="create-form">
+
+                    <!-- Network / environment name -->
                     <div class="fg">
-                        <label class="fl">Project Name</label>
-                        <input type="text" name="name" class="fi" required placeholder="e.g. backend-test">
+                        <label class="fl">Environment Name <span
+                                style="color:#4a5568;font-weight:400;text-transform:none">(used as Docker
+                                network)</span></label>
+                        <input type="text" id="field-network-name" name="network_name" class="fi"
+                            placeholder="e.g. staging-backend  (leave blank to auto-generate)">
                     </div>
+
+                    <!-- Container name -->
+                    <div class="form-row fg">
+                        <div>
+                            <label class="fl">Container Name</label>
+                            <input type="text" id="field-container-name" name="container_name" class="fi" required
+                                placeholder="e.g. api-server">
+                        </div>
+                        <div>
+                            <label class="fl">Role</label>
+                            <input type="text" id="field-role" name="role" class="fi" value="app"
+                                placeholder="app / db / proxy">
+                        </div>
+                    </div>
+
+                    <!-- Source type toggle -->
                     <div class="fg">
-                        <label class="fl">Configuration Mode</label>
+                        <label class="fl">Image Source</label>
                         <div class="radio-grp">
-                            <label class="rl"><input type="radio" name="mode" value="manual" checked> Manual</label>
-                            <label class="rl"><input type="radio" name="mode" value="blueprint"> Use Blueprint</label>
+                            <label class="rl">
+                                <input type="radio" name="source_type" id="src-image" value="image" checked>
+                                Docker Image
+                            </label>
+                            <label class="rl">
+                                <input type="radio" name="source_type" id="src-git" value="git">
+                                Build from Git
+                            </label>
                         </div>
                     </div>
-                    <div id="blueprint-fields" style="display:none" class="fg">
-                        <label class="fl">Select Blueprint</label>
-                        <select name="blueprint_id" id="blueprint-select" class="fi"></select>
-                    </div>
-                    <div id="manual-fields">
-                        <div class="form-row fg">
+
+                    <!-- Docker Image fields -->
+                    <div id="source-image-fields" class="fg">
+                        <div class="form-row">
                             <div>
-                                <label class="fl">Docker Image</label>
-                                <input type="text" name="image_tag" class="fi" value="nginx:latest">
+                                <label class="fl">Docker Image Tag</label>
+                                <input type="text" id="field-image" name="image_tag" class="fi" value="nginx:alpine"
+                                    placeholder="nginx:alpine">
                             </div>
                             <div>
-                                <label class="fl">Internal Port</label>
-                                <input type="number" name="internal_port" class="fi" value="80">
+                                <label class="fl">Container Port</label>
+                                <input type="number" id="field-port" name="internal_port" class="fi" value="80">
                             </div>
                         </div>
-                        <div class="fg">
-                            <label class="fl">Environment Variables</label>
-                            <div id="env-vars-container"></div>
-                            <button type="button" class="btn-add" onclick="addEnvVar()">+ Add Variable</button>
+                    </div>
+
+                    <!-- Git URL fields -->
+                    <div id="source-git-fields" class="fg" style="display:none">
+                        <div class="form-row">
+                            <div>
+                                <label class="fl">Git Repository URL</label>
+                                <input type="url" id="field-git-url" name="git_url" class="fi"
+                                    placeholder="https://github.com/your/repo">
+                            </div>
+                            <div>
+                                <label class="fl">Container Port</label>
+                                <input type="number" id="field-git-port" name="git_internal_port" class="fi" value="80">
+                            </div>
+                        </div>
+                        <div style="margin-top:6px;font-size:12px;color:#4a5568;">
+                            ℹ️ The repository must contain a <code style="color:#60a5fa">Dockerfile</code> in its root.
                         </div>
                     </div>
+
+                    <!-- Environment variables -->
+                    <div class="fg">
+                        <label class="fl">Environment Variables</label>
+
+                        <!-- Bulk paste -->
+                        <textarea id="bulk-env-paste" class="fi" rows="3"
+                            placeholder="Paste .env content here (KEY=VALUE per line) — will be parsed automatically"
+                            style="resize:vertical;font-family:monospace;font-size:12.5px;line-height:1.5;"></textarea>
+                        <div style="font-size:11px;color:#4a5568;margin-top:4px;margin-bottom:10px;">
+                            Lines starting with <code style="color:#60a5fa">#</code> and empty lines are ignored.
+                        </div>
+
+                        <div id="env-vars-container"></div>
+                        <button type="button" class="btn-add" onclick="addEnvVar()">+ Add Variable</button>
+                    </div>
+
                     <div class="form-actions">
                         <a href="#dashboard" class="btn-cancel">Cancel</a>
-                        <button type="submit" class="btn-submit">Create &amp; Launch</button>
+                        <button type="submit" class="btn-submit" id="create-submit-btn">Create &amp; Launch</button>
                     </div>
                 </form>
             </div>
         </div>
+
 
         <!-- BLUEPRINTS -->
         <div id="view-blueprints" class="view-container">
@@ -1013,7 +1104,7 @@
     </div>
 
     <div id="toast"></div>
-    <script src="/static/js/app.js?v=17"></script>
+    <script src="/static/js/app.js?v=19"></script>
 </body>
 
 </html>
