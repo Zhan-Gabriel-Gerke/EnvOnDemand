@@ -20,6 +20,25 @@ router = APIRouter()
 # Background task logic
 # ---------------------------------------------------------------------------
 
+async def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: int = 60) -> bool:
+    """
+    Проверяет доступность порта. Полезно как Healthcheck базы данных 
+    перед запуском зависимых приложений.
+    """
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    while loop.time() - start_time < timeout:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=1.0
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+            await asyncio.sleep(1)
+    return False
+
 async def _deploy_single_container(
     docker_service: DockerService,
     db: AsyncSession,
@@ -29,14 +48,11 @@ async def _deploy_single_container(
 ) -> bool:
     """
     Deploy one container and update its DB status.
-
     Returns True if the container started successfully, False otherwise.
     """
     try:
-        # Determine first port mapping to use as internal_port (default 80)
-        internal_port = 80
-        if container_spec.ports:
-            internal_port = next(iter(container_spec.ports.values()))
+        has_explicit_ports = bool(container_spec.ports)
+        internal_port = next(iter(container_spec.ports.values())) if container_spec.ports else 80
 
         if container_spec.git_url:
             run_info = await docker_service.build_and_run_from_git(
@@ -45,6 +61,7 @@ async def _deploy_single_container(
                 internal_port=internal_port,
                 environment=container_spec.env_vars,
                 network=network_name,
+                volumes=container_spec.volumes,
             )
         else:
             run_info = await docker_service.run_container(
@@ -53,33 +70,42 @@ async def _deploy_single_container(
                 environment=container_spec.env_vars,
                 network=network_name,
                 name=container_spec.name,
+                volumes=container_spec.volumes,
             )
+
+        host_port = run_info.get("port")
+        
+        # Ждем готовности, если порты были явно заданы юзером. Воркеры без портов игнорируют это.
+        if host_port and has_explicit_ports:
+            print(f"[Deployment] Waiting for healthcheck (port {host_port}) for '{container_spec.name}'...")
+            is_ready = await _wait_for_port(port=host_port)
+            if not is_ready:
+                print(f"[Deployment] Healthcheck timeout: port {host_port} not ready.")
+                await crud.update_container_status(
+                    db, container_db_id=db_container_id, status=ContainerStatus.FAILED
+                )
+                return False
 
         await crud.update_container_status(
             db,
             container_db_id=db_container_id,
             status=ContainerStatus.RUNNING,
             docker_container_id=run_info["container_id"],
-            host_port=run_info.get("port"),
+            host_port=host_port,
         )
         return True
 
     except (DockerServiceError, ConnectionError) as exc:
-        # GitCloneError is a subclass of DockerServiceError — caught here too.
         print(f"[Deployment] Container '{container_spec.name}' failed: {exc}")
         await crud.update_container_status(
-            db,
-            container_db_id=db_container_id,
-            status=ContainerStatus.FAILED,
+            db, container_db_id=db_container_id, status=ContainerStatus.FAILED
         )
         return False
 
     except Exception as exc:
         print(f"[Deployment] Unexpected error for container '{container_spec.name}': {exc}")
         await crud.update_container_status(
-            db,
-            container_db_id=db_container_id,
-            status=ContainerStatus.FAILED,
+            db, container_db_id=db_container_id, status=ContainerStatus.FAILED
         )
         return False
 
@@ -90,9 +116,7 @@ async def run_multi_container_deployment(
 ) -> None:
     """
     Background task: spin up all containers for a Deployment.
-
-    - Uses its own DB session (background tasks run outside the request session).
-    - Runs containers concurrently via asyncio.gather.
+    - Uses graph topological wait with asyncio.Event
     - Sets Deployment.status = RUNNING if all containers succeed, else FAILED.
     """
     async with AsyncSessionLocal() as db:
@@ -104,47 +128,60 @@ async def run_multi_container_deployment(
                     return
 
                 network_name = db_deployment.network_name
+                
+                # Словарик, чтобы находить id контейнера в БД по его имени
+                db_containers_map = {c.name: c for c in db_deployment.containers}
 
-                # Build (db_container_id, spec) pairs so we can update individual statuses.
-                db_containers = db_deployment.containers
-                if len(db_containers) != len(container_specs):
-                    print(
-                        f"[Deployment] Mismatch: {len(db_containers)} DB containers "
-                        f"vs {len(container_specs)} specs — aborting."
-                    )
-                    await crud.update_deployment_status(
-                        db, deployment_id=deployment_id, status=DeploymentStatus.FAILED
-                    )
-                    return
+                # Создаем Event-эвенты (маяки) и словарь результатов для каждого контейнера
+                events = {spec.name: asyncio.Event() for spec in container_specs}
+                results = {spec.name: False for spec in container_specs}
 
-                # Launch all containers concurrently.
-                # IMPORTANT: return_exceptions=True so that a failure in one
-                # coroutine does NOT cancel the others or propagate to the outer
-                # try-block, which would skip the final status update entirely.
-                raw_results = await asyncio.gather(
-                    *[
-                        _deploy_single_container(
+                async def deploy_task(spec: DeploymentContainerCreate) -> None:
+                    db_container = db_containers_map.get(spec.name)
+                    if not db_container:
+                        events[spec.name].set()
+                        return
+
+                    try:
+                        # 1. ЖДЕМ ЗАВИСИМОСТИ
+                        for dep in spec.depends_on or []:
+                            if dep in events:
+                                await events[dep].wait() # Ждем сигнала от предка!
+                                # Если предок после запуска выдал False (провалился), мы даже не стартуем
+                                if not results[dep]:
+                                    print(f"[Deployment] Dependency '{dep}' failed, skipping '{spec.name}'.")
+                                    await crud.update_container_status(
+                                        db, db_container.id, ContainerStatus.FAILED
+                                    )
+                                    return # Прерываем запуск
+
+                        # 2. ВСЕ ПРЕДКИ РАБОТАЮТ — ЗАПУСКАЕМ СВОЙ КОНТЕЙНЕР
+                        success = await _deploy_single_container(
                             docker_service, db, db_container.id, spec, network_name
                         )
-                        for db_container, spec in zip(db_containers, container_specs)
-                    ],
-                    return_exceptions=True,
-                )
+                        results[spec.name] = success
 
-                # _deploy_single_container never raises (it catches and returns
-                # False), but if it somehow does, treat Exception as failure.
-                results = [
-                    r if isinstance(r, bool) else False
-                    for r in raw_results
-                ]
+                    except Exception as e:
+                        print(f"[Deployment] Unexpected orchestrator error for '{spec.name}': {e}")
+                        results[spec.name] = False
+                    
+                    finally:
+                        # 3. Сигнализируем, что мы закончили попытку запуска. 
+                        # Следующий в очереди сбросит wait() и начнет читать results.
+                        events[spec.name].set()
 
+                # Закидываем все задачи в gather единовременно. Event'ы выстроят их в очередь внутри.
+                tasks = [asyncio.create_task(deploy_task(spec)) for spec in container_specs]
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Проверяем итог всей операции: если у всех контейнеров True - успех, иначе провал.
                 final_status = (
-                    DeploymentStatus.RUNNING if all(results) else DeploymentStatus.FAILED
+                    DeploymentStatus.RUNNING if all(results.values()) else DeploymentStatus.FAILED
                 )
                 await crud.update_deployment_status(
                     db, deployment_id=deployment_id, status=final_status
                 )
-                print(f"[Deployment] {deployment_id} → {final_status.value}")
+                print(f"[Deployment] {deployment_id} pipeline finished with status → {final_status.value}")
 
             except ConnectionError as exc:
                 print(f"[Deployment] Cannot connect to Docker daemon: {exc}")
@@ -152,7 +189,7 @@ async def run_multi_container_deployment(
                     db, deployment_id=deployment_id, status=DeploymentStatus.FAILED
                 )
             except Exception as exc:
-                print(f"[Deployment] Fatal error in background task for {deployment_id}: {exc}")
+                print(f"[Deployment] Critical pipeline failure for {deployment_id}: {exc}")
                 await crud.update_deployment_status(
                     db, deployment_id=deployment_id, status=DeploymentStatus.FAILED
                 )

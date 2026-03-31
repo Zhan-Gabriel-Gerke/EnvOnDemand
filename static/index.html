@@ -195,6 +195,23 @@
             color: #64748b;
         }
 
+        .btn-logout {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: #64748b;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .btn-logout:hover {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
         /* ===== MAIN ===== */
         .main {
             flex: 1;
@@ -828,6 +845,7 @@
                 <div class="user-name">Admin</div>
                 <div class="user-email">admin@example.com</div>
             </div>
+            <button class="btn-logout" onclick="logout()" title="Logout">🚪</button>
         </div>
     </aside>
 
@@ -842,9 +860,6 @@
                     <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
                 </div>
                 <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
-                <button class="action-btn btn-danger" id="logout-btn"
-                    style="display:none;padding:8px 16px;font-size:13px;border-radius:6px;margin-left:8px;"
-                    onclick="logout()" title="Secure Logout">Logout</button>
             </div>
         </header>
 
@@ -925,7 +940,7 @@
 
         <!-- CREATE -->
         <div id="view-create" class="view-container">
-            <div class="form-card">
+            <div class="form-card" style="max-width: 800px;">
                 <div class="form-title">Create New Environment</div>
                 <form id="create-form">
 
@@ -938,91 +953,113 @@
                             placeholder="e.g. staging-backend  (leave blank to auto-generate)">
                     </div>
 
-                    <!-- Container name -->
-                    <div class="form-row fg">
-                        <div>
-                            <label class="fl">Container Name</label>
-                            <input type="text" id="field-container-name" name="container_name" class="fi" required
-                                placeholder="e.g. api-server">
-                        </div>
-                        <div>
-                            <label class="fl">Role</label>
-                            <input type="text" id="field-role" name="role" class="fi" value="app"
-                                placeholder="app / db / proxy">
-                        </div>
+                    <div id="services-container">
+                        <!-- Container cards will be injected here -->
                     </div>
 
-                    <!-- Source type toggle -->
-                    <div class="fg">
-                        <label class="fl">Image Source</label>
-                        <div class="radio-grp">
-                            <label class="rl">
-                                <input type="radio" name="source_type" id="src-image" value="image" checked>
-                                Docker Image
-                            </label>
-                            <label class="rl">
-                                <input type="radio" name="source_type" id="src-git" value="git">
-                                Build from Git
-                            </label>
-                        </div>
+                    <div style="margin-top: 16px;">
+                        <button type="button" class="btn-create" id="add-service-btn" style="background: #1e2332; border: 1px dashed #3ea6ff; color: #3ea6ff; width: 100%; text-align: center; font-weight: 500;">+ Add another service</button>
                     </div>
 
-                    <!-- Docker Image fields -->
-                    <div id="source-image-fields" class="fg">
-                        <div class="form-row">
-                            <div>
-                                <label class="fl">Docker Image Tag</label>
-                                <input type="text" id="field-image" name="image_tag" class="fi" value="nginx:alpine"
-                                    placeholder="nginx:alpine">
-                            </div>
-                            <div>
-                                <label class="fl">Container Port</label>
-                                <input type="number" id="field-port" name="internal_port" class="fi" value="80">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Git URL fields -->
-                    <div id="source-git-fields" class="fg" style="display:none">
-                        <div class="form-row">
-                            <div>
-                                <label class="fl">Git Repository URL</label>
-                                <input type="url" id="field-git-url" name="git_url" class="fi"
-                                    placeholder="https://github.com/your/repo">
-                            </div>
-                            <div>
-                                <label class="fl">Container Port</label>
-                                <input type="number" id="field-git-port" name="git_internal_port" class="fi" value="80">
-                            </div>
-                        </div>
-                        <div style="margin-top:6px;font-size:12px;color:#4a5568;">
-                            ℹ️ The repository must contain a <code style="color:#60a5fa">Dockerfile</code> in its root.
-                        </div>
-                    </div>
-
-                    <!-- Environment variables -->
-                    <div class="fg">
-                        <label class="fl">Environment Variables</label>
-
-                        <!-- Bulk paste -->
-                        <textarea id="bulk-env-paste" class="fi" rows="3"
-                            placeholder="Paste .env content here (KEY=VALUE per line) — will be parsed automatically"
-                            style="resize:vertical;font-family:monospace;font-size:12.5px;line-height:1.5;"></textarea>
-                        <div style="font-size:11px;color:#4a5568;margin-top:4px;margin-bottom:10px;">
-                            Lines starting with <code style="color:#60a5fa">#</code> and empty lines are ignored.
-                        </div>
-
-                        <div id="env-vars-container"></div>
-                        <button type="button" class="btn-add" onclick="addEnvVar()">+ Add Variable</button>
-                    </div>
-
-                    <div class="form-actions">
+                    <div class="form-actions" style="margin-top: 32px">
                         <a href="#dashboard" class="btn-cancel">Cancel</a>
                         <button type="submit" class="btn-submit" id="create-submit-btn">Create &amp; Launch</button>
                     </div>
                 </form>
             </div>
         </div>
+
+        <!-- Template for Container Card -->
+        <template id="service-card-template">
+            <div class="container-card service-form" style="background: #0f1117; border: 1px solid #1e2332; border-radius: 8px; padding: 20px; margin-top: 20px; position: relative;">
+                <button type="button" class="ab del btn-remove-container" style="position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;" onclick="removeContainerCard(this)" title="Remove Container">✕</button>
+                <div style="font-size: 14px; font-weight: 600; color: #f0f4ff; margin-bottom: 16px;" class="card-heading">Service Configuration</div>
+                
+                <!-- Container name, Role, Depends On -->
+                <div class="form-row fg" style="grid-template-columns: 1fr 120px 140px;">
+                    <div>
+                        <label class="fl">Container Name</label>
+                        <input type="text" name="container_name" class="fi" required
+                            placeholder="e.g. api-server">
+                    </div>
+                    <div>
+                        <label class="fl">Role</label>
+                        <input type="text" name="role" class="fi" value="app"
+                            placeholder="app / db">
+                    </div>
+                    <div>
+                        <label class="fl">Depends On</label>
+                        <input type="text" name="depends_on" class="fi" placeholder="e.g. db, cache">
+                    </div>
+                </div>
+
+                <!-- Source type toggle -->
+                <div class="fg">
+                    <label class="fl">Image Source</label>
+                    <div class="radio-grp">
+                        <label class="rl">
+                            <input type="radio" class="src-image-radio" value="image" checked>
+                            Docker Image
+                        </label>
+                        <label class="rl">
+                            <input type="radio" class="src-git-radio" value="git">
+                            Build from Git
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Docker Image fields -->
+                <div class="source-image-fields fg">
+                    <div class="form-row">
+                        <div>
+                            <label class="fl">Docker Image Tag</label>
+                            <input type="text" name="image_tag" class="fi" value="nginx:alpine"
+                                placeholder="nginx:alpine">
+                        </div>
+                        <div>
+                            <label class="fl">Container Port</label>
+                            <input type="number" name="internal_port" class="fi" value="80">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Git URL fields -->
+                <div class="source-git-fields fg" style="display:none">
+                    <div class="form-row">
+                        <div>
+                            <label class="fl">Git Repository URL</label>
+                            <input type="url" name="git_url" class="fi"
+                                placeholder="https://github.com/your/repo">
+                        </div>
+                        <div>
+                            <label class="fl">Container Port</label>
+                            <input type="number" name="git_internal_port" class="fi" value="80">
+                        </div>
+                    </div>
+                    <div style="margin-top:6px;font-size:12px;color:#4a5568;">
+                        ℹ️ The repository must contain a <code style="color:#60a5fa">Dockerfile</code> in its root.
+                    </div>
+                </div>
+
+                <!-- Volumes -->
+                <div class="fg">
+                    <label class="fl">Volumes</label>
+                    <textarea name="volumes" class="fi" rows="2"
+                        placeholder="e.g. ./data:/var/lib/postgresql/data (one per line)"></textarea>
+                </div>
+
+                <!-- Environment variables -->
+                <div class="fg" style="margin-bottom:0">
+                    <label class="fl">Environment Variables</label>
+                    <textarea class="fi bulk-env-paste" rows="2"
+                        placeholder="Paste .env content here... (KEY=VALUE per line)"
+                        style="resize:vertical;font-family:monospace;font-size:12px;margin-bottom: 8px;"></textarea>
+
+                    <div class="env-vars-container"></div>
+                    <button type="button" class="btn-add" onclick="addEnvVar(this)">+ Add Variable</button>
+                </div>
+            </div>
+        </template>
 
 
         <!-- BLUEPRINTS -->

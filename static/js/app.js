@@ -63,65 +63,74 @@ async function api(path, options = {}) {
 
 // ===== ROUTER =====
 function navigate() {
-    const hash = window.location.hash || '#dashboard';
-    const parts = hash.split('/');
-    const view = parts[0].substring(1);
-    const id = parts[1];
+    try {
+        const hash = window.location.hash || '#dashboard';
+        const parts = hash.split('/');
+        const view = parts[0].substring(1);
+        const id = parts[1];
 
-    // Auth guard
-    const token = localStorage.getItem('auth_token');
-    if (!token && view !== 'login') {
-        window.location.hash = '#login';
-        return;
-    }
-
-    document.querySelectorAll('.view-container').forEach(el => el.classList.remove('view-active'));
-    if (state.pollingInterval) { clearInterval(state.pollingInterval); state.pollingInterval = null; }
-
-    // Nav highlight
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-
-    const topbarRight = document.querySelector('.topbar-right');
-    const logoutBtn = document.getElementById('logout-btn');
-    const sidebar = document.getElementById('app-sidebar');
-
-    if (logoutBtn) logoutBtn.style.display = token ? 'inline-block' : 'none';
-
-    if (view === 'login') {
-        if (sidebar) sidebar.classList.add('d-none');
-        document.getElementById('page-title').textContent = 'Authentication Required';
-        topbarRight.style.display = 'none';
-        document.getElementById('view-login').classList.add('view-active');
-    } else {
-        if (sidebar) sidebar.classList.remove('d-none');
-
-        if (view === 'create') {
-            document.getElementById('page-title').textContent = 'Create Environment';
-            topbarRight.style.display = 'none';
-            renderCreate();
-        } else if (view === 'blueprints') {
-            document.getElementById('nav-blueprints') && document.getElementById('nav-blueprints').classList.add('active');
-            document.getElementById('page-title').textContent = 'Image Templates';
-            topbarRight.innerHTML = `<button class="btn-create" onclick="showCreateBlueprint()">+ New Template</button>`;
-            topbarRight.style.display = 'flex';
-            renderBlueprints();
-        } else if (view === 'details' && id) {
-            document.getElementById('page-title').textContent = 'Environment Details';
-            topbarRight.style.display = 'none';
-            renderDetails(id);
-        } else {
-            document.getElementById('nav-environments') && document.getElementById('nav-environments').classList.add('active');
-            document.getElementById('page-title').textContent = 'Environments';
-            topbarRight.innerHTML = `
-            <div class="search-box">
-                <span style="color:#4a5568;font-size:12px;">🔍</span>
-                <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
-            </div>
-            <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
-        `;
-            topbarRight.style.display = 'flex';
-            renderDashboard();
+        // Auth guard
+        const token = localStorage.getItem('auth_token');
+        if (!token && view !== 'login') {
+            window.location.hash = '#login';
+            return;
         }
+
+        document.querySelectorAll('.view-container').forEach(el => el.classList.remove('view-active'));
+        if (state.pollingInterval) { clearInterval(state.pollingInterval); state.pollingInterval = null; }
+
+        // Nav highlight
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+        const topbarRight = document.querySelector('.topbar-right');
+        const sidebar = document.getElementById('app-sidebar');
+        const pageTitle = document.getElementById('page-title');
+
+        if (view === 'login') {
+            if (sidebar) sidebar.classList.add('d-none');
+            if (pageTitle) pageTitle.textContent = 'Authentication Required';
+            if (topbarRight) topbarRight.style.display = 'none';
+            const viewLogin = document.getElementById('view-login');
+            if (viewLogin) viewLogin.classList.add('view-active');
+        } else {
+            if (sidebar) sidebar.classList.remove('d-none');
+
+            if (view === 'create') {
+                if (pageTitle) pageTitle.textContent = 'Create Environment';
+                if (topbarRight) topbarRight.style.display = 'none';
+                renderCreate();
+            } else if (view === 'blueprints') {
+                const navBlueprints = document.getElementById('nav-blueprints');
+                if (navBlueprints) navBlueprints.classList.add('active');
+                if (pageTitle) pageTitle.textContent = 'Image Templates';
+                if (topbarRight) {
+                    topbarRight.innerHTML = `<button class="btn-create" onclick="showCreateBlueprint()">+ New Template</button>`;
+                    topbarRight.style.display = 'flex';
+                }
+                renderBlueprints();
+            } else if (view === 'details' && id) {
+                if (pageTitle) pageTitle.textContent = 'Environment Details';
+                if (topbarRight) topbarRight.style.display = 'none';
+                renderDetails(id);
+            } else {
+                const navEnvs = document.getElementById('nav-environments');
+                if (navEnvs) navEnvs.classList.add('active');
+                if (pageTitle) pageTitle.textContent = 'Environments';
+                if (topbarRight) {
+                    topbarRight.innerHTML = `
+                    <div class="search-box">
+                        <span style="color:#4a5568;font-size:12px;">🔍</span>
+                        <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
+                    </div>
+                    <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
+                    `;
+                    topbarRight.style.display = 'flex';
+                }
+                renderDashboard();
+            }
+        }
+    } catch (e) {
+        console.error("Routing error:", e);
     }
 }
 
@@ -319,23 +328,97 @@ async function deleteBlueprint(id) {
 async function renderCreate() {
     document.getElementById('view-create').classList.add('view-active');
     document.getElementById('create-form').reset();
-    document.getElementById('env-vars-container').innerHTML = '';
+    document.getElementById('services-container').innerHTML = '';
+    
+    // Reset standard state and add the first container
+    containerCounter = 0;
+    addServiceCard();
+}
 
-    // Restore default visibility on reset
-    document.getElementById('source-image-fields').style.display = 'block';
-    document.getElementById('source-git-fields').style.display = 'none';
+let containerCounter = 0;
 
-    // Wire up source-type toggle
-    document.querySelectorAll('input[name="source_type"]').forEach(radio => {
-        // Remove stale listeners by cloning
-        const fresh = radio.cloneNode(true);
-        radio.parentNode.replaceChild(fresh, radio);
-        fresh.addEventListener('change', () => {
-            const isGit = fresh.value === 'git';
-            document.getElementById('source-image-fields').style.display = isGit ? 'none' : 'block';
-            document.getElementById('source-git-fields').style.display = isGit ? 'block' : 'none';
-        });
+function addServiceCard() {
+    containerCounter++;
+    const template = document.getElementById('service-card-template');
+    const clone = template.content.cloneNode(true);
+    
+    const card = clone.querySelector('.container-card');
+    
+    // Setup Radios unique grouping to prevent cross-card interference
+    const radioName = `source_type_${containerCounter}`;
+    const srcImage = card.querySelector('.src-image-radio');
+    const srcGit = card.querySelector('.src-git-radio');
+    srcImage.name = radioName;
+    srcGit.name = radioName;
+    
+    const imgFields = card.querySelector('.source-image-fields');
+    const gitFields = card.querySelector('.source-git-fields');
+
+    // Radio logic
+    srcImage.addEventListener('change', () => {
+        imgFields.style.display = 'block';
+        gitFields.style.display = 'none';
     });
+    srcGit.addEventListener('change', () => {
+        imgFields.style.display = 'none';
+        gitFields.style.display = 'block';
+    });
+
+    // Bulk Paste logic scoped to this specific card
+    const bulkArea = card.querySelector('.bulk-env-paste');
+    const envContainer = card.querySelector('.env-vars-container');
+    
+    function parseCardBulkEnv() {
+        const raw = bulkArea.value;
+        if (!raw.trim()) return;
+        const lines = raw.split('\n');
+        let added = 0;
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return;
+            const eqIdx = trimmed.indexOf('=');
+            if (eqIdx === -1) return;
+            const key = trimmed.slice(0, eqIdx).trim();
+            const value = trimmed.slice(eqIdx + 1).trim();
+            if (!key) return;
+            addEnvVarToContainer(envContainer, key, value);
+            added++;
+        });
+        if (added > 0) {
+            bulkArea.value = '';
+            showToast(`Parsed ${added} variable(s)`, 'ok');
+        }
+    }
+    
+    bulkArea.addEventListener('paste', () => setTimeout(parseCardBulkEnv, 0));
+    bulkArea.addEventListener('input', () => { if (bulkArea.value.includes('\n')) parseCardBulkEnv(); });
+
+    document.getElementById('services-container').appendChild(card);
+}
+
+function removeContainerCard(btn) {
+    const wrapper = document.getElementById('services-container');
+    if (wrapper.children.length <= 1) {
+        showToast('You must have at least one container!', 'error');
+        return;
+    }
+    btn.closest('.container-card').remove();
+}
+
+function addEnvVarToContainer(containerEl, key = '', val = '') {
+    const row = document.createElement('div');
+    row.className = 'ev-row';
+    row.innerHTML = `
+        <input type="text" class="fi env-key-input" placeholder="KEY" value="${key}">
+        <input type="text" class="fi env-val-input" placeholder="VALUE" value="${val}">
+        <button type="button" class="ab" onclick="this.parentElement.remove()" title="Remove" style="color:#f87171;">✕</button>
+    `;
+    containerEl.appendChild(row);
+}
+
+function addEnvVar(btn) {
+    const containerEl = btn.parentElement.querySelector('.env-vars-container');
+    addEnvVarToContainer(containerEl);
 }
 
 // ===== DETAILS VIEW =====
@@ -404,51 +487,72 @@ async function renderDetails(id) {
 // ===== ACTIONS =====
 async function handleCreate(e) {
     e.preventDefault();
-    const fd = new FormData(e.target);
     const btn = document.getElementById('create-submit-btn');
 
-    // Collect env vars
-    const envObj = {};
-    document.getElementsByName('env_key[]').forEach((keyEl, i) => {
-        const valEl = document.getElementsByName('env_val[]')[i];
-        if (keyEl.value.trim()) envObj[keyEl.value.trim()] = valEl ? valEl.value : '';
-    });
+    const networkName = (document.getElementById('field-network-name').value || '').trim() || undefined;
 
-    // Determine source: image or git_url
-    const sourceType = fd.get('source_type');         // 'image' | 'git'
-    const containerName = (fd.get('container_name') || '').trim();
-    const role = (fd.get('role') || 'app').trim();
+    const cards = document.querySelectorAll('.container-card');
+    const containers = [];
 
-    let containerSpec;
-    if (sourceType === 'git') {
-        const gitUrl = (fd.get('git_url') || '').trim();
-        if (!gitUrl) { showToast('Git URL is required', 'error'); return; }
-        const port = parseInt(fd.get('git_internal_port') || '80', 10);
-        containerSpec = {
-            name: containerName,
-            role: role,
-            git_url: gitUrl,
-            ports: { [port]: port },   // { host_port: container_port }
-            env_vars: envObj,
-        };
-    } else {
-        const imageTag = (fd.get('image_tag') || '').trim();
-        if (!imageTag) { showToast('Docker image tag is required', 'error'); return; }
-        const port = parseInt(fd.get('internal_port') || '80', 10);
-        containerSpec = {
-            name: containerName,
-            role: role,
-            image: imageTag,
-            ports: { [port]: port },
-            env_vars: envObj,
-        };
+    for (let card of cards) {
+        const containerName = (card.querySelector('[name="container_name"]').value || '').trim();
+        const role = (card.querySelector('[name="role"]').value || 'app').trim();
+        const dependsRaw = card.querySelector('[name="depends_on"]').value || '';
+        const dependsOn = dependsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+        // Extract environment variables
+        const envObj = getEnvFromCard(card);
+
+        // Volumes
+        const volumesObj = {};
+        const volumesStr = card.querySelector('[name="volumes"]').value || '';
+        volumesStr.split('\n').forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#')) {
+                const parts = trimmed.split(':');
+                if (parts.length >= 2) {
+                    volumesObj[parts[0].trim()] = parts.slice(1).join(':').trim();
+                }
+            }
+        });
+        const finalVolumes = Object.keys(volumesObj).length > 0 ? volumesObj : undefined;
+
+        const isGit = card.querySelector('.src-git-radio').checked;
+        let containerSpec;
+
+        if (isGit) {
+            const gitUrl = (card.querySelector('[name="git_url"]').value || '').trim();
+            if (!gitUrl) { showToast('Git URL is required for ' + (containerName || 'a container'), 'error'); return; }
+            const port = parseInt(card.querySelector('[name="git_internal_port"]').value || '80', 10);
+            containerSpec = {
+                name: containerName || 'git-app',
+                role: role,
+                git_url: gitUrl,
+                ports: { [port]: port },
+                env_vars: envObj,
+                volumes: finalVolumes,
+                depends_on: dependsOn.length > 0 ? dependsOn : undefined
+            };
+        } else {
+            const imageTag = (card.querySelector('[name="image_tag"]').value || '').trim();
+            if (!imageTag) { showToast('Docker image tag is required for ' + (containerName || 'a container'), 'error'); return; }
+            const port = parseInt(card.querySelector('[name="internal_port"]').value || '80', 10);
+            containerSpec = {
+                name: containerName || 'image-app',
+                role: role,
+                image: imageTag,
+                ports: { [port]: port },
+                env_vars: envObj,
+                volumes: finalVolumes,
+                depends_on: dependsOn.length > 0 ? dependsOn : undefined
+            };
+        }
+        containers.push(containerSpec);
     }
 
-    // Build the DeploymentCreate payload
-    const networkName = (fd.get('network_name') || '').trim() || undefined;
     const payload = {
         ...(networkName ? { network_name: networkName } : {}),
-        containers: [containerSpec],
+        containers: containers,
     };
 
     try {
@@ -501,61 +605,6 @@ async function handleDelete(id, projectId = null, redirect = false) {
     }
 }
 
-function addEnvVar() {
-    const row = document.createElement('div');
-    row.className = 'ev-row';
-    row.innerHTML = `
-        <input type="text" name="env_key[]" class="fi" placeholder="KEY">
-        <input type="text" name="env_val[]" class="fi" placeholder="VALUE">
-        <button type="button" class="ab" onclick="this.parentElement.remove()" title="Remove" style="color:#f87171;">✕</button>
-    `;
-    document.getElementById('env-vars-container').appendChild(row);
-}
-
-function parseBulkEnv() {
-    const textarea = document.getElementById('bulk-env-paste');
-    if (!textarea) return;
-
-    const raw = textarea.value;
-    if (!raw.trim()) return;
-
-    const lines = raw.split('\n');
-    let added = 0;
-
-    lines.forEach(line => {
-        const trimmed = line.trim();
-        // Skip blank lines and comments
-        if (!trimmed || trimmed.startsWith('#')) return;
-
-        // Split only on the FIRST '=' so values like BASE64=abc=def= work correctly
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx === -1) return;  // no '=' found — skip malformed line
-
-        const key = trimmed.slice(0, eqIdx).trim();
-        const value = trimmed.slice(eqIdx + 1).trim();
-
-        if (!key) return;
-
-        addEnvVar();
-        added++;
-
-        // Fill the row that was just appended
-        const container = document.getElementById('env-vars-container');
-        const rows = container.querySelectorAll('.ev-row');
-        const lastRow = rows[rows.length - 1];
-        lastRow.querySelector('[name="env_key[]"]').value = key;
-        lastRow.querySelector('[name="env_val[]"]').value = value;
-    });
-
-    if (added > 0) {
-        textarea.value = '';
-        showToast(`Parsed ${added} variable${added === 1 ? '' : 's'} from .env`, 'ok');
-    } else {
-        showToast('No valid KEY=VALUE pairs found', 'error');
-    }
-}
-
-
 // ===== AUTHENTICATION =====
 async function handleLogin(e) {
     e.preventDefault();
@@ -591,21 +640,34 @@ function logout() {
     showToast('Logged out securely', 'ok');
 }
 
-// ===== INIT =====
-window.addEventListener('hashchange', navigate);
-window.addEventListener('load', () => {
+
+function addEventListeners() {
     document.getElementById('create-form').addEventListener('submit', handleCreate);
     document.getElementById('blueprint-form').addEventListener('submit', handleCreateBlueprint);
     document.getElementById('login-form').addEventListener('submit', handleLogin);
-
-    // Bulk env-paste: fire on paste (Ctrl+V) and on input (drag-drop / programmatic)
-    // Use setTimeout so the textarea value is already updated when paste fires.
-    const bulkArea = document.getElementById('bulk-env-paste');
-    if (bulkArea) {
-        bulkArea.addEventListener('paste', () => setTimeout(parseBulkEnv, 0));
-        bulkArea.addEventListener('input', () => { if (bulkArea.value.includes('\n')) parseBulkEnv(); });
+    
+    // Attach listener to Add Service button
+    const addServiceBtn = document.getElementById('add-service-btn');
+    if (addServiceBtn) {
+        addServiceBtn.addEventListener('click', addServiceCard);
     }
+}
 
+function getEnvFromCard(card) {
+    const envObj = {};
+    const envKeys = card.querySelectorAll('.env-key-input');
+    const envVals = card.querySelectorAll('.env-val-input');
+    envKeys.forEach((keyEl, i) => {
+        const key = keyEl.value.trim();
+        if (key) envObj[key] = envVals[i] ? envVals[i].value : '';
+    });
+    return envObj;
+}
+
+// ===== INIT =====
+window.addEventListener('hashchange', navigate);
+window.addEventListener('load', () => {
+    addEventListeners();
     navigate();
 });
 

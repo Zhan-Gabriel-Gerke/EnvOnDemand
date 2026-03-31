@@ -83,6 +83,7 @@ class DockerService:
         cpu_limit: Optional[str],
         network: Optional[str] = None,
         name: Optional[str] = None,
+        volumes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Pull (if needed) and start a container. Synchronous — call via run_in_executor."""
         try:
@@ -118,6 +119,11 @@ class DockerService:
             ports=port_mapping,
             environment=processed_env,
         )
+        if volumes:
+            kwargs["volumes"] = {
+                host_path: {"bind": container_path, "mode": "rw"}
+                for host_path, container_path in volumes.items()
+            }
         if nano_cpus:
             kwargs["nano_cpus"] = nano_cpus
         if network:
@@ -191,13 +197,14 @@ class DockerService:
         cpu_limit: Optional[str] = None,
         network: Optional[str] = None,
         name: Optional[str] = None,
+        volumes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Pull an image and run a container asynchronously."""
         self._assert_client()
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
-            partial(self._run_container_sync, image_tag, internal_port, environment, cpu_limit, network, name),
+            partial(self._run_container_sync, image_tag, internal_port, environment, cpu_limit, network, name, volumes),
         )
 
     async def build_and_run_from_git(
@@ -208,6 +215,7 @@ class DockerService:
         environment: Optional[Dict[str, str]] = None,
         cpu_limit: Optional[str] = None,
         network: Optional[str] = None,
+        volumes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Clone a Git repository, build its Docker image, and run a container.
@@ -274,6 +282,7 @@ class DockerService:
                     cpu_limit,
                     network,
                     name,
+                    volumes,
                 ),
             )
 

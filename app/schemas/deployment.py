@@ -37,6 +37,14 @@ class DeploymentContainerCreate(BaseModel):
         default=None,
         description="Port mappings: {host_port: container_port}",
     )
+    volumes: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Volume mappings: {host_dir: container_dir}"
+    )
+    depends_on: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Names of containers this container depends on. Dependent containers will wait until these are RUNNING."
+    )
 
     @model_validator(mode="after")
     def check_image_or_git_url(self) -> "DeploymentContainerCreate":
