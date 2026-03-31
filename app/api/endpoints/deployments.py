@@ -260,6 +260,64 @@ async def create_deployment(
     return db_deployment
 
 
+@router.put("/deployments/{deployment_id}", response_model=DeploymentRead, status_code=status.HTTP_202_ACCEPTED)
+async def update_deployment(
+    deployment_id: uuid.UUID,
+    deployment_in: DeploymentCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(["admin", "developer"])),
+) -> DeploymentRead:
+    """
+    Update an existing deployment by completely tearing it down and rebuilding it.
+    """
+    db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
+    if not db_deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    # Check quota difference
+    old_length = len(db_deployment.containers) if db_deployment.containers else 0
+    new_length = len(deployment_in.containers)
+    diff = new_length - old_length
+    
+    if diff > 0 and current_user.quota:
+        available = current_user.quota.max_containers - current_user.quota.active_containers
+        if diff > available:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Resource limits exhausted: adding {diff} new containers but only {available} slots available."
+            )
+
+    # Teardown existing docker containers
+    if db_deployment.containers:
+        async with DockerService() as docker_service:
+            for container in db_deployment.containers:
+                if container.container_id:
+                    try:
+                        await docker_service.stop_container(container.container_id)
+                        await docker_service.remove_container(container.container_id)
+                    except Exception as e:
+                        print(f"Failed to remove container {container.container_id} during edit: {e}")
+
+    # Recreate in DB
+    await crud.recreate_deployment_containers(db, deployment_id, deployment_in.containers)
+    
+    # Update deployment network and status
+    db_deployment.network_name = deployment_in.network_name or db_deployment.network_name
+    db_deployment.status = DeploymentStatus.PENDING
+    await db.commit()
+    await db.refresh(db_deployment)
+    
+    # Re-run background task
+    background_tasks.add_task(
+        run_multi_container_deployment,
+        db_deployment.id,
+        deployment_in.containers,
+    )
+    
+    return db_deployment
+
+
 @router.get("/deployments", response_model=List[DeploymentRead])
 async def list_deployments(
     db: AsyncSession = Depends(get_db),

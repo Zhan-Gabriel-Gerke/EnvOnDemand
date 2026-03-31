@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import delete
 from sqlalchemy.orm import selectinload
 
 from app.models.models import (
@@ -86,6 +87,29 @@ async def create_multi_container_deployment(
     await db.commit()
     return await get_deployment(db, db_deployment.id)
 
+async def recreate_deployment_containers(
+    db: AsyncSession,
+    deployment_id: uuid.UUID,
+    containers_in: List[DeploymentContainerCreate],
+) -> None:
+    """Delete old containers and insert new ones for an existing deployment."""
+    await db.execute(
+        delete(DeploymentContainer)
+        .where(DeploymentContainer.deployment_id == deployment_id)
+    )
+    
+    for container_spec in containers_in:
+        image_label = container_spec.image or f"git:{container_spec.git_url}"
+        db_container = DeploymentContainer(
+            deployment_id=deployment_id,
+            name=container_spec.name,
+            image=image_label,
+            role=container_spec.role,
+            status=ContainerStatus.PENDING,
+        )
+        db.add(db_container)
+    
+    await db.commit()
 
 # ---------------------------------------------------------------------------
 # Update helpers

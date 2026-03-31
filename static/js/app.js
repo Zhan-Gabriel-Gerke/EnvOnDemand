@@ -198,6 +198,7 @@ async function renderDashboard() {
                     <td>
                         <div class="actions">
                             <a href="#details/${d.id}" class="ab" title="Manage">&#128203;</a>
+                            <button class="ab btn-edit" onclick="editDeployment('${d.id}')" title="Edit">&#9998;</button>
                             ${statusKey === 'STOPPED' ? `<button class="ab" onclick="handleAction('${d.id}','start')" title="Start">&#9654;</button>` : ''}
                             ${statusKey === 'RUNNING' ? `<button class="ab" onclick="handleAction('${d.id}','stop')" title="Stop">&#9209;</button>` : ''}
                             <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete">&#128465;</button>
@@ -326,6 +327,9 @@ async function deleteBlueprint(id) {
 
 
 async function renderCreate() {
+    state.editingId = null;
+    document.getElementById('page-title').textContent = 'Create Environment';
+    document.getElementById('create-submit-btn').textContent = 'Create & Launch';
     document.getElementById('view-create').classList.add('view-active');
     document.getElementById('create-form').reset();
     document.getElementById('services-container').innerHTML = '';
@@ -353,6 +357,11 @@ function addServiceCard() {
     
     const imgFields = card.querySelector('.source-image-fields');
     const gitFields = card.querySelector('.source-git-fields');
+
+    const nameInput = card.querySelector('[name="container_name"]');
+    if (nameInput) {
+        nameInput.addEventListener('input', updateDependencySelects);
+    }
 
     // Radio logic
     srcImage.addEventListener('change', () => {
@@ -394,6 +403,7 @@ function addServiceCard() {
     bulkArea.addEventListener('input', () => { if (bulkArea.value.includes('\n')) parseCardBulkEnv(); });
 
     document.getElementById('services-container').appendChild(card);
+    updateDependencySelects();
 }
 
 function removeContainerCard(btn) {
@@ -403,6 +413,62 @@ function removeContainerCard(btn) {
         return;
     }
     btn.closest('.container-card').remove();
+    updateDependencySelects();
+}
+
+function updateDependencySelects() {
+    const names = [];
+    document.querySelectorAll('#services-container .container-card').forEach(card => {
+        const nameInput = card.querySelector('[name="container_name"]');
+        if (nameInput && nameInput.value.trim()) {
+            names.push({ name: nameInput.value.trim(), card: card });
+        }
+    });
+
+    document.querySelectorAll('#services-container .container-card').forEach(card => {
+        const wrapper = card.querySelector('.depends-on-wrapper');
+        if (!wrapper) return;
+        
+        const currentSelected = Array.from(wrapper.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+        wrapper.innerHTML = '';
+        
+        let hasOptions = false;
+        names.forEach(n => {
+            if (n.card !== card) {
+                hasOptions = true;
+                const label = document.createElement('label');
+                label.className = 'dependency-pill';
+                
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = n.name;
+                cb.style.display = 'none';
+                if (currentSelected.includes(n.name)) {
+                    cb.checked = true;
+                }
+                
+                const span = document.createElement('span');
+                span.textContent = n.name;
+                
+                label.appendChild(cb);
+                label.appendChild(span);
+                wrapper.appendChild(label);
+                
+                cb.addEventListener('change', () => {
+                    if (cb.checked) {
+                        label.classList.add('selected');
+                    } else {
+                        label.classList.remove('selected');
+                    }
+                });
+                if (cb.checked) label.classList.add('selected');
+            }
+        });
+
+        if (!hasOptions) {
+            wrapper.innerHTML = '<span style="color: #4a5568; font-size: 13px; margin-top: 4px;">No other services</span>';
+        }
+    });
 }
 
 function addEnvVarToContainer(containerEl, key = '', val = '') {
@@ -485,6 +551,44 @@ async function renderDetails(id) {
 }
 
 // ===== ACTIONS =====
+async function editDeployment(id) {
+    try {
+        const d = state.deployments.find(x => x.id === id);
+        if (!d) return;
+        state.editingId = id;
+
+        document.getElementById('view-create').classList.add('view-active');
+        document.getElementById('page-title').textContent = 'Edit Environment';
+        document.getElementById('create-submit-btn').textContent = 'Save & Redeploy';
+        
+        document.getElementById('create-form').reset();
+        document.getElementById('services-container').innerHTML = '';
+        document.getElementById('field-network-name').value = d.network_name || '';
+        
+        containerCounter = 0;
+        
+        d.containers.forEach(c => {
+            addServiceCard();
+            const cards = document.querySelectorAll('.container-card');
+            const card = cards[cards.length - 1];
+            
+            card.querySelector('[name="container_name"]').value = c.name;
+            card.querySelector('[name="role"]').value = c.role || '';
+            
+            if (c.image.startsWith('git:')) {
+                card.querySelector('.src-git-radio').click();
+                card.querySelector('[name="git_url"]').value = c.image.substring(4);
+            } else {
+                card.querySelector('.src-image-radio').click();
+                card.querySelector('[name="image_tag"]').value = c.image;
+            }
+        });
+        updateDependencySelects();
+    } catch (e) {
+        showToast('Error editing: ' + e.message, 'error');
+    }
+}
+
 async function handleCreate(e) {
     e.preventDefault();
     const btn = document.getElementById('create-submit-btn');
@@ -497,8 +601,8 @@ async function handleCreate(e) {
     for (let card of cards) {
         const containerName = (card.querySelector('[name="container_name"]').value || '').trim();
         const role = (card.querySelector('[name="role"]').value || 'app').trim();
-        const dependsRaw = card.querySelector('[name="depends_on"]').value || '';
-        const dependsOn = dependsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        const wrapper = card.querySelector('.depends-on-wrapper');
+        const dependsOn = wrapper ? Array.from(wrapper.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value) : [];
 
         // Extract environment variables
         const envObj = getEnvFromCard(card);
@@ -556,17 +660,22 @@ async function handleCreate(e) {
     };
 
     try {
-        btn.textContent = 'Launching…';
+        btn.textContent = state.editingId ? 'Redeploying…' : 'Launching…';
         btn.disabled = true;
 
-        await api('/deployments', { method: 'POST', body: JSON.stringify(payload) });
-        showToast('Environment queued — launching in background!', 'ok');
+        if (state.editingId) {
+            await api(`/deployments/${state.editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+            state.editingId = null;
+            showToast('Environment updated and redeploying!', 'ok');
+        } else {
+            await api('/deployments', { method: 'POST', body: JSON.stringify(payload) });
+            showToast('Environment queued — launching in background!', 'ok');
+        }
         window.location.hash = '#dashboard';
-
     } catch (err) {
-        showToast('Creation failed: ' + err.message, 'error');
+        showToast((state.editingId ? 'Update' : 'Creation') + ' failed: ' + err.message, 'error');
     } finally {
-        btn.textContent = 'Create & Launch';
+        btn.textContent = state.editingId ? 'Save & Redeploy' : 'Create & Launch';
         btn.disabled = false;
     }
 }

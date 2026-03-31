@@ -212,6 +212,30 @@
             background: rgba(239, 68, 68, 0.1);
         }
 
+        .dependency-pill {
+            display: inline-flex;
+            align-items: center;
+            background: #151822;
+            border: 1px solid #1e2332;
+            color: #94a3b8;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        .dependency-pill:hover {
+            border-color: #3b82f6;
+            color: #e2e8f0;
+        }
+        .dependency-pill.selected {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: #3b82f6;
+            color: #3ea6ff;
+            font-weight: 600;
+        }
+
         /* ===== MAIN ===== */
         .main {
             flex: 1;
@@ -989,7 +1013,9 @@
                     </div>
                     <div>
                         <label class="fl">Depends On</label>
-                        <input type="text" name="depends_on" class="fi" placeholder="e.g. db, cache">
+                        <div class="depends-on-wrapper" style="display: flex; flex-wrap: wrap; gap: 6px; min-height: 38px; padding: 4px 0;">
+                            <span style="color: #4a5568; font-size: 13px; margin-top: 4px;">No other services yet</span>
+                        </div>
                     </div>
                 </div>
 
