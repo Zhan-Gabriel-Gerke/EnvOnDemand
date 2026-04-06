@@ -41,6 +41,7 @@ class AuditedEntityType(str, enum.Enum):
     PROJECT = "PROJECT"
     BLUEPRINT = "BLUEPRINT"
     DEPLOYMENT = "DEPLOYMENT"
+    VOLUME = "VOLUME"
 
 
 class Role(Base):
@@ -78,6 +79,7 @@ class User(Base):
     )
     projects: Mapped[List["Project"]] = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
     deployments: Mapped[List["Deployment"]] = relationship("Deployment", back_populates="user", cascade="all, delete-orphan")
+    volumes: Mapped[List["Volume"]] = relationship("Volume", back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
@@ -213,3 +215,19 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog(id={self.id}, action='{self.action}', entity_type='{self.entity_type.value}')>"
+
+
+class Volume(Base):
+    """Represents a standalone Docker Volume managed by a user."""
+    __tablename__ = "volumes"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="volumes")
+
+    def __repr__(self) -> str:
+        return f"<Volume(id={self.id}, name='{self.name}')>"

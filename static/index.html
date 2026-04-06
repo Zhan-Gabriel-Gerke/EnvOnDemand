@@ -856,6 +856,9 @@
             <a href="#blueprints" class="nav-item" id="nav-blueprints">
                 <span>◈</span> Image Templates
             </a>
+            <a href="#volumes" class="nav-item" id="nav-volumes">
+                <span>💾</span> Storage Volumes
+            </a>
         </nav>
 
         <div class="sidebar-section">PROJECTS</div>
@@ -869,7 +872,13 @@
                 <div class="user-name">Admin</div>
                 <div class="user-email">admin@example.com</div>
             </div>
-            <button class="btn-logout" onclick="logout()" title="Logout">🚪</button>
+            <button class="btn-logout" onclick="logout()" title="Logout" style="display:flex;align-items:center;justify-content:center;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+            </button>
         </div>
     </aside>
 
@@ -879,10 +888,6 @@
         <header class="topbar" id="app-topbar">
             <div class="page-title" id="page-title">Environments</div>
             <div class="topbar-right" id="topbar-right">
-                <div class="search-box">
-                    <span style="color:#4a5568;font-size:12px;">🔍</span>
-                    <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
-                </div>
                 <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
             </div>
         </header>
@@ -993,6 +998,26 @@
             </div>
         </div>
 
+        <!-- VOLUMES -->
+        <div id="view-volumes" class="view-container">
+            <div class="table-card">
+                <table class="env-table">
+                    <thead>
+                        <tr>
+                            <th>NAME</th>
+                            <th>CREATED AT</th>
+                            <th style="width: 100px; text-align: center;">ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="volume-list">
+                        <tr>
+                            <td colspan="3" class="empty-row">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Template for Container Card -->
         <template id="service-card-template">
             <div class="container-card service-form" style="background: #0f1117; border: 1px solid #1e2332; border-radius: 8px; padding: 20px; margin-top: 20px; position: relative;">
@@ -1036,15 +1061,21 @@
 
                 <!-- Docker Image fields -->
                 <div class="source-image-fields fg">
+                    <div style="margin-bottom: 12px;">
+                        <label class="fl">Load from Template (Optional) <span style="color:#4a5568;font-weight:400;text-transform:none">autofills details below</span></label>
+                        <select class="fi blueprint-select" style="margin-bottom: 8px;">
+                            <option value="">-- Custom Image --</option>
+                        </select>
+                    </div>
                     <div class="form-row">
                         <div>
                             <label class="fl">Docker Image Tag</label>
-                            <input type="text" name="image_tag" class="fi" value="nginx:alpine"
+                            <input type="text" name="image_tag" class="fi" value=""
                                 placeholder="nginx:alpine">
                         </div>
                         <div>
                             <label class="fl">Container Port</label>
-                            <input type="number" name="internal_port" class="fi" value="80">
+                            <input type="number" name="internal_port" class="fi" value="">
                         </div>
                     </div>
                 </div>
@@ -1069,9 +1100,14 @@
 
                 <!-- Volumes -->
                 <div class="fg">
-                    <label class="fl">Volumes</label>
-                    <textarea name="volumes" class="fi" rows="2"
-                        placeholder="e.g. ./data:/var/lib/postgresql/data (one per line)"></textarea>
+                    <label class="fl">Standalone Volume (Optional)</label>
+                    <div class="form-row" style="grid-template-columns: 1fr 1fr auto;">
+                        <select class="fi volume-select" name="volume_name">
+                            <option value="">-- No Volume --</option>
+                        </select>
+                        <input type="text" name="volume_target" class="fi" placeholder="Container Path (e.g. /data)">
+                        <button type="button" class="btn-create" style="padding: 0 16px;" onclick="promptCreateVolumeForForm(this)">+ New</button>
+                    </div>
                 </div>
 
                 <!-- Environment variables -->

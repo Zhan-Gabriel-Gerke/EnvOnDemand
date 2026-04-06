@@ -181,6 +181,25 @@ class DockerService:
         except APIError as exc:
             raise DockerServiceError(f"Failed to get logs for container {container_id}: {exc}")
 
+    def _create_volume_sync(self, name: str) -> None:
+        """Create a new Docker volume. Synchronous."""
+        try:
+            self.client.volumes.create(name=name)
+        except APIError as exc:
+            raise DockerServiceError(f"Failed to create volume {name}: {exc}")
+
+    def _remove_volume_sync(self, name: str) -> None:
+        """Remove a Docker volume. Synchronous."""
+        try:
+            volume = self.client.volumes.get(name)
+            volume.remove(force=True)
+        except NotFound:
+            pass # Already gone
+        except APIError as exc:
+            if "in use" in str(exc).lower():
+                raise DockerServiceError(f"Volume '{name}' is currently in use by a container.")
+            raise DockerServiceError(f"Failed to remove volume {name}: {exc}")
+
     # ------------------------------------------------------------------
     # Public async API
     # ------------------------------------------------------------------
@@ -206,6 +225,18 @@ class DockerService:
             None,
             partial(self._run_container_sync, image_tag, internal_port, environment, cpu_limit, network, name, volumes),
         )
+
+    async def create_volume(self, name: str) -> None:
+        """Create a standalone Docker volume asynchronously."""
+        self._assert_client()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, partial(self._create_volume_sync, name))
+
+    async def remove_volume(self, name: str) -> None:
+        """Remove a standalone Docker volume asynchronously."""
+        self._assert_client()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, partial(self._remove_volume_sync, name))
 
     async def build_and_run_from_git(
         self,

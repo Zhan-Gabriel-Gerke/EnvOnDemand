@@ -3,8 +3,11 @@ const API_BASE = '/api';
 const state = {
     deployments: [],
     projects: [],
+    blueprints: [],
+    volumes: [],
     currentView: 'dashboard',
-    pollingInterval: null
+    pollingInterval: null,
+    editingId: null
 };
 
 // ===== PROJECT DELETE =====
@@ -108,6 +111,17 @@ function navigate() {
                     topbarRight.style.display = 'flex';
                 }
                 renderBlueprints();
+            } else if (view === 'volumes') {
+                const navVolumes = document.getElementById('nav-volumes');
+                if (navVolumes) navVolumes.classList.add('active');
+                if (pageTitle) pageTitle.textContent = 'Storage Volumes';
+                if (topbarRight) {
+                    topbarRight.innerHTML = `<button class="btn-create" onclick="createVolume()">+ Create Volume</button>`;
+                    topbarRight.style.display = 'flex';
+                }
+                const viewVolumes = document.getElementById('view-volumes');
+                if (viewVolumes) viewVolumes.classList.add('view-active');
+                renderVolumes();
             } else if (view === 'details' && id) {
                 if (pageTitle) pageTitle.textContent = 'Environment Details';
                 if (topbarRight) topbarRight.style.display = 'none';
@@ -118,10 +132,6 @@ function navigate() {
                 if (pageTitle) pageTitle.textContent = 'Environments';
                 if (topbarRight) {
                     topbarRight.innerHTML = `
-                    <div class="search-box">
-                        <span style="color:#4a5568;font-size:12px;">🔍</span>
-                        <input type="text" id="search-input" placeholder="Search environments..." oninput="filterTable()">
-                    </div>
                     <button class="btn-create" onclick="window.location.hash='#create'">+ Create New Environment</button>
                     `;
                     topbarRight.style.display = 'flex';
@@ -139,12 +149,16 @@ async function renderDashboard() {
     document.getElementById('view-dashboard').classList.add('view-active');
 
     try {
-        const [deployments, projects] = await Promise.all([
+        const [deployments, projects, blueprints, volumes] = await Promise.all([
             api('/deployments'),
-            api('/projects').catch(() => [])
+            api('/projects').catch(() => []),
+            api('/blueprints').catch(() => []),
+            api('/volumes').catch(() => [])
         ]);
         state.deployments = deployments;
         state.projects = projects;
+        state.blueprints = blueprints;
+        state.volumes = volumes || [];
 
         // Build project lookup map
         const projectMap = {};
@@ -201,7 +215,7 @@ async function renderDashboard() {
                             <button class="ab btn-edit" onclick="editDeployment('${d.id}')" title="Edit">&#9998;</button>
                             ${statusKey === 'STOPPED' ? `<button class="ab" onclick="handleAction('${d.id}','start')" title="Start">&#9654;</button>` : ''}
                             ${statusKey === 'RUNNING' ? `<button class="ab" onclick="handleAction('${d.id}','stop')" title="Stop">&#9209;</button>` : ''}
-                            <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete">&#128465;</button>
+                            <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                         </div>
                     </td>
                 </tr>`;
@@ -254,7 +268,7 @@ async function renderBlueprints() {
                     <td>${bp.default_port}</td>
                     <td><div class="actions">
                         <button class="ab" onclick="editBlueprint('${bp.id}')" title="Edit">&#9998;</button>
-                        <button class="ab del" onclick="deleteBlueprint('${bp.id}')" title="Delete">&#128465;</button>
+                        <button class="ab del" onclick="deleteBlueprint('${bp.id}')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                     </div></td>
                 </tr>
             `).join('');
@@ -350,6 +364,60 @@ function addServiceCard() {
     
     // Setup Radios unique grouping to prevent cross-card interference
     const radioName = `source_type_${containerCounter}`;
+    // Handle templates dropdown
+    const bpSelect = card.querySelector('.blueprint-select');
+    if (bpSelect && state.blueprints) {
+        state.blueprints.forEach(bp => {
+            const opt = document.createElement('option');
+            opt.value = bp.id;
+            opt.textContent = `${bp.name} (${bp.image_tag})`;
+            bpSelect.appendChild(opt);
+        });
+        
+        bpSelect.addEventListener('change', (e) => {
+            const pbId = e.target.value;
+            if (!pbId) return; // custom
+            
+            const bp = state.blueprints.find(b => b.id === pbId);
+            if (!bp) return;
+            
+            card.querySelector('[name="image_tag"]').value = bp.image_tag || '';
+            card.querySelector('[name="internal_port"]').value = bp.default_port || '80';
+            
+            // clear old envs
+            const envContainer = card.querySelector('.env-vars-container');
+            if (envContainer) envContainer.innerHTML = '';
+            
+            // add template envs
+            if (bp.default_env_vars && typeof bp.default_env_vars === 'object') {
+                for (let [k, v] of Object.entries(bp.default_env_vars)) {
+                    addEnvVarToContainer(envContainer || card.querySelector('.env-vars-container'), k, v);
+                }
+            }
+            
+            // pre-guess a role based on name
+            const roleInput = card.querySelector('[name="role"]');
+            if (roleInput && !roleInput.value) {
+                if (bp.name.toLowerCase().includes('db') || bp.name.toLowerCase().includes('postgres') || bp.name.toLowerCase().includes('redis')) {
+                    roleInput.value = 'db';
+                } else {
+                    roleInput.value = 'app';
+                }
+            }
+        });
+    }
+
+    // Populate volumes dropdown
+    const volSelect = card.querySelector('.volume-select');
+    if (volSelect && state.volumes) {
+        state.volumes.forEach(vol => {
+            const opt = document.createElement('option');
+            opt.value = vol.name;
+            opt.textContent = vol.name;
+            volSelect.appendChild(opt);
+        });
+    }
+
     const srcImage = card.querySelector('.src-image-radio');
     const srcGit = card.querySelector('.src-git-radio');
     srcImage.name = radioName;
@@ -608,17 +676,16 @@ async function handleCreate(e) {
         const envObj = getEnvFromCard(card);
 
         // Volumes
+        const volSelect = card.querySelector('.volume-select');
+        const volTarget = card.querySelector('[name="volume_target"]');
         const volumesObj = {};
-        const volumesStr = card.querySelector('[name="volumes"]').value || '';
-        volumesStr.split('\n').forEach(line => {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#')) {
-                const parts = trimmed.split(':');
-                if (parts.length >= 2) {
-                    volumesObj[parts[0].trim()] = parts.slice(1).join(':').trim();
-                }
-            }
-        });
+        
+        if (volSelect && volSelect.value && volTarget && volTarget.value) {
+            volumesObj[volSelect.value] = {
+                "bind": volTarget.value.trim(),
+                "mode": "rw"
+            };
+        }
         const finalVolumes = Object.keys(volumesObj).length > 0 ? volumesObj : undefined;
 
         const isGit = card.querySelector('.src-git-radio').checked;
@@ -740,6 +807,90 @@ async function handleLogin(e) {
     } finally {
         btn.textContent = 'Authorize';
         btn.disabled = false;
+    }
+}
+
+// ===== VOLUMES =====
+async function renderVolumes() {
+    const list = document.getElementById('volume-list');
+    try {
+        const volumes = await api('/volumes');
+        state.volumes = volumes;
+        list.innerHTML = '';
+        if (volumes.length === 0) {
+            list.innerHTML = '<tr><td colspan="3" class="empty-row">No volumes found.</td></tr>';
+            return;
+        }
+
+        volumes.forEach(vol => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${vol.name}</strong></td>
+                <td style="color:#94a3b8; font-size:13px">${new Date(vol.created_at).toLocaleString()}</td>
+                <td style="text-align: center;">
+                    <button class="ab del" onclick="deleteVolume('${vol.id}')" title="Delete" style="margin: 0 auto;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                </td>
+            `;
+            list.appendChild(tr);
+        });
+    } catch (e) {
+        showToast('Error loading volumes: ' + e.message, 'error');
+    }
+}
+
+async function createVolume() {
+    const name = prompt('Enter a name for the new Docker volume:');
+    if (!name || !name.trim()) return;
+
+    try {
+        await api('/volumes', {
+            method: 'POST',
+            body: JSON.stringify({ name: name.trim() })
+        });
+        showToast('Volume created successfully!', 'ok');
+        renderVolumes();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function deleteVolume(id) {
+    if (!confirm('Delete this standalone volume? Data inside it will be permanently lost!')) return;
+    try {
+        await api(`/volumes/${id}`, { method: 'DELETE' });
+        showToast('Volume deleted.', 'ok');
+        renderVolumes();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function promptCreateVolumeForForm(btn) {
+    const name = prompt('Enter a name for the new Docker volume:');
+    if (!name || !name.trim()) return;
+
+    try {
+        const result = await api('/volumes', {
+            method: 'POST',
+            body: JSON.stringify({ name: name.trim() })
+        });
+        state.volumes.push(result);
+        showToast('Volume created successfully!', 'ok');
+        
+        // Find select in same card and add the option
+        const card = btn.closest('.container-card');
+        if (card) {
+            const select = card.querySelector('.volume-select');
+            if (select) {
+                const opt = document.createElement('option');
+                opt.value = result.name;
+                opt.textContent = result.name;
+                select.appendChild(opt);
+                select.value = result.name; // Auto-select it
+            }
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
     }
 }
 
