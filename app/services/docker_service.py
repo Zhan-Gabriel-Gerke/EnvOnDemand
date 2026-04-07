@@ -1,6 +1,5 @@
 import asyncio
 import shutil
-import socket
 import tempfile
 from functools import partial
 from typing import Dict, Any, Optional
@@ -9,9 +8,7 @@ import docker
 from docker.errors import ImageNotFound, APIError, NotFound
 
 
-# ---------------------------------------------------------------------------
 # Custom exceptions
-# ---------------------------------------------------------------------------
 
 class DockerServiceError(Exception):
     """Base exception for all Docker service-related errors."""
@@ -29,9 +26,7 @@ class GitCloneError(DockerServiceError):
     """Raised when a 'git clone' subprocess returns a non-zero exit code."""
 
 
-# ---------------------------------------------------------------------------
 # Service
-# ---------------------------------------------------------------------------
 
 class DockerService:
     """Manages the lifecycle of Docker containers asynchronously.
@@ -64,16 +59,7 @@ class DockerService:
             except Exception:
                 pass
 
-    # ------------------------------------------------------------------
     # Internal sync helpers (run inside executor threads)
-    # ------------------------------------------------------------------
-
-    def _find_free_port_sync(self) -> int:
-        """Find and return a free ephemeral port on the host."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
 
     def _run_container_sync(
         self,
@@ -85,7 +71,31 @@ class DockerService:
         name: Optional[str] = None,
         volumes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Pull (if needed) and start a container. Synchronous — call via run_in_executor."""
+        """Pull (if needed) and start a container. Synchronous — call via run_in_executor.
+
+        Port allocation strategy
+        ------------------------
+        We pass ``{internal_port}/tcp: None`` to the Docker daemon so that it
+        picks a free ephemeral host port automatically.  This completely
+        eliminates the TOCTOU race condition that existed when we called
+        _find_free_port_sync() ourselves (bind → close → Docker binds — three
+        steps, not atomic).
+
+        After the container is started we call ``container.reload()`` to fetch
+        the freshly-assigned host port from
+        ``container.attrs['NetworkSettings']['Ports']``.
+
+        ${PORT} injection
+        -----------------
+        The ``${PORT}`` placeholder in environment values is replaced with
+        ``internal_port`` — the port the application *listens on inside the
+        container*.  This mirrors the convention used by Railway, Render and
+        Fly.io: the app binds to $PORT internally; the platform decides which
+        host port forwards to it.  The host port is returned in the result dict
+        so callers can record it (e.g. in the database) and expose it to users.
+        """
+
+        # 1. Ensure the image is available locally
         try:
             self.client.images.get(image_tag)
             print(f"[DockerService] Image '{image_tag}' exists locally.")
@@ -98,20 +108,25 @@ class DockerService:
             except APIError as exc:
                 raise DockerImageError(f"Failed to pull image '{image_tag}': {exc}")
         except APIError as exc:
-             raise DockerServiceError(f"Docker API error when checking image '{image_tag}': {exc}")
+            raise DockerServiceError(f"Docker API error when checking image '{image_tag}': {exc}")
 
-        free_port = self._find_free_port_sync()
-        port_mapping = {f"{internal_port}/tcp": free_port} if internal_port else {}
-        nano_cpus = int(float(cpu_limit) * 1_000_000_000) if cpu_limit else None
 
-        # Dynamic Port Injection: Replace ${PORT} in env vars with the allocated free_port
-        processed_env = {}
+        # 2. Build env — ${PORT} → internal_port (app's own listen port)
+
+        processed_env: Dict[str, str] = {}
         if environment:
             for k, v in environment.items():
                 if isinstance(v, str):
-                    processed_env[k] = v.replace("${PORT}", str(free_port))
+                    processed_env[k] = v.replace("${PORT}", str(internal_port))
                 else:
                     processed_env[k] = v
+
+      
+        # 3. Build run kwargs
+        #    ports={"<internal>/tcp": None}  → Docker auto-assigns host port
+      
+        port_mapping = {f"{internal_port}/tcp": None} if internal_port else {}
+        nano_cpus = int(float(cpu_limit) * 1_000_000_000) if cpu_limit else None
 
         kwargs: Dict[str, Any] = dict(
             image=image_tag,
@@ -134,19 +149,45 @@ class DockerService:
                 try:
                     print(f"[DockerService] Creating network '{network}' …")
                     self.client.networks.create(network, driver="bridge")
-                except APIError as e:
-                    # Ignore parallel creation conflicts or other errors
+                except APIError:
+                    # Another parallel deploy may have created it already — safe to ignore.
                     pass
         if name:
             kwargs["name"] = name
 
+      
+        # 4. Start the container
+  
         try:
-            print(f"[DockerService] Starting container '{name or image_tag}' on port {free_port} …")
+            print(f"[DockerService] Starting container '{name or image_tag}' …")
             container = self.client.containers.run(**kwargs)
-            print(f"[DockerService] Container {container.id[:12]} started successfully.")
-            return {"container_id": container.id, "port": free_port}
         except APIError as exc:
             raise ContainerStartError(f"Failed to start container for image '{image_tag}': {exc}")
+
+        
+        # 5. Reload attrs to discover the host port Docker actually bound
+      
+        try:
+            container.reload()
+            port_key = f"{internal_port}/tcp"
+            port_bindings = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+            bindings = port_bindings.get(port_key)
+            if not bindings:
+                raise ContainerStartError(
+                    f"Container {container.id[:12]} started but no host port was bound for "
+                    f"{port_key}. NetworkSettings.Ports={port_bindings}"
+                )
+            host_port = int(bindings[0]["HostPort"])
+        except APIError as exc:
+            raise ContainerStartError(
+                f"Failed to reload container {container.id[:12]} after start: {exc}"
+            )
+
+        print(
+            f"[DockerService] Container {container.id[:12]} started — "
+            f"host_port={host_port}, internal_port={internal_port}."
+        )
+        return {"container_id": container.id, "port": host_port}
 
     def _build_image_sync(self, path: str, tag: str) -> None:
         """Build a Docker image from a local Dockerfile. Synchronous — call via run_in_executor."""
@@ -200,9 +241,9 @@ class DockerService:
                 raise DockerServiceError(f"Volume '{name}' is currently in use by a container.")
             raise DockerServiceError(f"Failed to remove volume {name}: {exc}")
 
-    # ------------------------------------------------------------------
+
     # Public async API
-    # ------------------------------------------------------------------
+
 
     def _assert_client(self) -> None:
         if not self.client:
