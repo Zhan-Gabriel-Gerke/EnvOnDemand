@@ -132,8 +132,7 @@ class Blueprint(Base):
     default_port: Mapped[int] = mapped_column(Integer)
     default_env_vars: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     cpu_limit: Mapped[Optional[str]] = mapped_column(String(50))
-
-    cpu_limit: Mapped[Optional[str]] = mapped_column(String(50))
+    mem_limit: Mapped[Optional[str]] = mapped_column(String(50))
 
     def __repr__(self) -> str:
         return f"<Blueprint(id={self.id}, name='{self.name}', image_tag='{self.image_tag}')>"

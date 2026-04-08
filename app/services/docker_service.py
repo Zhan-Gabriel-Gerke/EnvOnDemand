@@ -67,6 +67,7 @@ class DockerService:
         internal_port: int,
         environment: Optional[Dict[str, str]],
         cpu_limit: Optional[str],
+        mem_limit: Optional[str] = None,
         network: Optional[str] = None,
         name: Optional[str] = None,
         volumes: Optional[Dict[str, str]] = None,
@@ -134,6 +135,8 @@ class DockerService:
             ports=port_mapping,
             environment=processed_env,
         )
+        if mem_limit:
+            kwargs["mem_limit"] = mem_limit
         if volumes:
             kwargs["volumes"] = {
                 host_path: {"bind": container_path, "mode": "rw"}
@@ -255,6 +258,7 @@ class DockerService:
         internal_port: int,
         environment: Optional[Dict[str, str]] = None,
         cpu_limit: Optional[str] = None,
+        mem_limit: Optional[str] = None,
         network: Optional[str] = None,
         name: Optional[str] = None,
         volumes: Optional[Dict[str, str]] = None,
@@ -264,7 +268,7 @@ class DockerService:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
-            partial(self._run_container_sync, image_tag, internal_port, environment, cpu_limit, network, name, volumes),
+            partial(self._run_container_sync, image_tag, internal_port, environment, cpu_limit, mem_limit, network, name, volumes),
         )
 
     async def create_volume(self, name: str) -> None:
@@ -286,6 +290,7 @@ class DockerService:
         internal_port: int = 80,
         environment: Optional[Dict[str, str]] = None,
         cpu_limit: Optional[str] = None,
+        mem_limit: Optional[str] = None,
         network: Optional[str] = None,
         volumes: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
@@ -352,6 +357,7 @@ class DockerService:
                     internal_port,
                     environment,
                     cpu_limit,
+                    mem_limit,
                     network,
                     name,
                     volumes,

@@ -13,6 +13,7 @@ class BlueprintBase(BaseModel):
     default_port: int
     default_env_vars: Dict[str, Any] = {}
     cpu_limit: Optional[str] = None
+    mem_limit: Optional[str] = None
 
 
 class BlueprintCreate(BlueprintBase):
@@ -27,6 +28,7 @@ class BlueprintUpdate(BaseModel):
     default_port: Optional[int] = None
     default_env_vars: Optional[Dict[str, Any]] = None
     cpu_limit: Optional[str] = None
+    mem_limit: Optional[str] = None
 
 
 class BlueprintRead(BlueprintBase):

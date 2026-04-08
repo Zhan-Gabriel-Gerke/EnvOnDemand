@@ -7,6 +7,8 @@ from sqlalchemy.future import select
 from app.db.session import get_db
 from app.models.models import User
 from app.core.security import verify_password, create_access_token
+from app.schemas.user import UserCreate, UserRead
+import app.crud.user as crud_user
 
 router = APIRouter()
 
@@ -43,3 +45,35 @@ async def login_for_access_token(
     # to bind a token to a specific identity without leaking internal details.
     access_token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(access_token=access_token)
+
+
+@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+async def register(
+    user_in: UserCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Register a new user identity.
+    Checks if the username or email is already taken.
+    """
+    # Check if user or email already exists
+    result = await db.execute(
+        select(User).filter((User.username == user_in.username) | (User.email == user_in.email))
+    )
+    existing_user = result.scalars().first()
+    
+    if existing_user:
+        if existing_user.username == user_in.username:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already registered"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+
+    # Proceed to create user
+    new_user = await crud_user.create_user(db, user_in=user_in)
+    return new_user

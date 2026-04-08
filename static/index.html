@@ -892,10 +892,12 @@
             </div>
         </header>
 
-        <!-- LOGIN -->
+        <!-- LOGIN / REGISTER -->
         <div id="view-login" class="view-container">
             <div style="max-width: 400px; margin: 60px auto;">
-                <div class="form-card">
+                
+                <!-- Login Form -->
+                <div class="form-card" id="login-card">
                     <div class="form-title" style="text-align: center; margin-bottom: 30px;">
                         🔑 Secure Login
                     </div>
@@ -912,8 +914,40 @@
                             <button type="submit" class="btn-submit" style="width: 100%"
                                 id="login-submit-btn">Authorize</button>
                         </div>
+                        <div style="text-align: center; margin-top: 20px; font-size: 13px;">
+                            <a href="#" onclick="toggleAuthForm('register'); return false;" style="color: #3b82f6; text-decoration: none;">Don't have an account? Sign up</a>
+                        </div>
                     </form>
                 </div>
+
+                <!-- Registration Form (Hidden by default) -->
+                <div class="form-card" id="register-card" style="display: none;">
+                    <div class="form-title" style="text-align: center; margin-bottom: 30px;">
+                        📝 Sign Up
+                    </div>
+                    <form id="register-form">
+                        <div class="fg">
+                            <label class="fl">Username</label>
+                            <input type="text" name="username" class="fi" required placeholder="johndoe">
+                        </div>
+                        <div class="fg">
+                            <label class="fl">Email</label>
+                            <input type="email" name="email" class="fi" required placeholder="john@example.com">
+                        </div>
+                        <div class="fg">
+                            <label class="fl">Password</label>
+                            <input type="password" name="password" class="fi" required minlength="4" placeholder="••••••••">
+                        </div>
+                        <div class="form-actions" style="margin-top: 30px;">
+                            <button type="submit" class="btn-submit" style="width: 100%"
+                                id="register-submit-btn">Create Account</button>
+                        </div>
+                        <div style="text-align: center; margin-top: 20px; font-size: 13px;">
+                            <a href="#" onclick="toggleAuthForm('login'); return false;" style="color: #3b82f6; text-decoration: none;">Already have an account? Log in</a>
+                        </div>
+                    </form>
+                </div>
+
             </div>
         </div>
 
@@ -1110,6 +1144,18 @@
                     </div>
                 </div>
 
+                <!-- Resource Limits -->
+                <div class="form-row fg" style="grid-template-columns: 1fr 1fr;">
+                    <div>
+                        <label class="fl">CPU Limit <span style="color:#4a5568;font-weight:400;text-transform:none">(optional)</span></label>
+                        <input type="text" name="cpu_limit" class="fi" placeholder="e.g. 0.5 or 1">
+                    </div>
+                    <div>
+                        <label class="fl">RAM Limit <span style="color:#4a5568;font-weight:400;text-transform:none">(optional)</span></label>
+                        <input type="text" name="mem_limit" class="fi" placeholder="e.g. 512m or 1g" value="512m">
+                    </div>
+                </div>
+
                 <!-- Environment variables -->
                 <div class="fg" style="margin-bottom:0">
                     <label class="fl">Environment Variables</label>
@@ -1156,6 +1202,10 @@
                                     required value="nginx:latest"></div>
                             <div><label class="fl">Default Port</label><input type="number" name="bp_port" class="fi"
                                     required value="80"></div>
+                        </div>
+                        <div class="form-row fg" style="grid-template-columns: 1fr 1fr;">
+                            <div><label class="fl">CPU Limit <span style="color:#4a5568;font-weight:400;text-transform:none">(optional)</span></label><input type="text" name="bp_cpu_limit" class="fi" placeholder="e.g. 0.5"></div>
+                            <div><label class="fl">RAM Limit <span style="color:#4a5568;font-weight:400;text-transform:none">(optional)</span></label><input type="text" name="bp_mem_limit" class="fi" placeholder="e.g. 512m or 1g"></div>
                         </div>
                         <div class="form-actions">
                             <button type="button" class="btn-cancel"

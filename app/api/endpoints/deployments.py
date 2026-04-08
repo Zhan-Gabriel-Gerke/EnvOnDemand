@@ -60,6 +60,7 @@ async def _deploy_single_container(
                 name=container_spec.name,
                 internal_port=internal_port,
                 environment=container_spec.env_vars,
+                mem_limit=container_spec.mem_limit,
                 network=network_name,
                 volumes=container_spec.volumes,
             )
@@ -68,6 +69,7 @@ async def _deploy_single_container(
                 image_tag=container_spec.image,  # type: ignore[arg-type]
                 internal_port=internal_port,
                 environment=container_spec.env_vars,
+                mem_limit=container_spec.mem_limit,
                 network=network_name,
                 name=container_spec.name,
                 volumes=container_spec.volumes,
@@ -151,9 +153,11 @@ async def run_multi_container_deployment(
                                 if not results[dep]:
                                     print(f"[Deployment] Dependency '{dep}' failed, skipping '{spec.name}'.")
                                     await crud.update_container_status(
-                                        db, db_container.id, ContainerStatus.FAILED
+                                        db,
+                                        container_db_id=db_container.id,
+                                        status=ContainerStatus.FAILED,
                                     )
-                                    return # Прерываем запуск
+                                    return # Abort startup
 
                         # 2. ВСЕ ПРЕДКИ РАБОТАЮТ — ЗАПУСКАЕМ СВОЙ КОНТЕЙНЕР
                         success = await _deploy_single_container(
@@ -181,7 +185,7 @@ async def run_multi_container_deployment(
                 await crud.update_deployment_status(
                     db, deployment_id=deployment_id, status=final_status
                 )
-                print(f"[Deployment] {deployment_id} pipeline finished with status → {final_status.value}")
+                print(f"[Deployment] {deployment_id} pipeline finished with status: {final_status.value}")
 
             except ConnectionError as exc:
                 print(f"[Deployment] Cannot connect to Docker daemon: {exc}")

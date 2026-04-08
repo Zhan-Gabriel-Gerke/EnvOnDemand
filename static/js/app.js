@@ -300,6 +300,8 @@ function editBlueprint(id) {
     form.elements['bp_name'].value = bp.name;
     form.elements['bp_image'].value = bp.image_tag;
     form.elements['bp_port'].value = bp.default_port;
+    form.elements['bp_cpu_limit'].value = bp.cpu_limit || '';
+    form.elements['bp_mem_limit'].value = bp.mem_limit || '';
 }
 
 async function handleCreateBlueprint(e) {
@@ -309,6 +311,9 @@ async function handleCreateBlueprint(e) {
     const method = bpId ? 'PATCH' : 'POST';
     const url = bpId ? `/blueprints/${bpId}` : '/blueprints';
 
+    const cpuLimit = (fd.get('bp_cpu_limit') || '').trim() || null;
+    const memLimit = (fd.get('bp_mem_limit') || '').trim() || null;
+
     try {
         await api(url, {
             method: method,
@@ -316,7 +321,9 @@ async function handleCreateBlueprint(e) {
                 name: fd.get('bp_name'),
                 image_tag: fd.get('bp_image'),
                 default_port: parseInt(fd.get('bp_port')),
-                default_env_vars: {}
+                default_env_vars: {},
+                cpu_limit: cpuLimit,
+                mem_limit: memLimit,
             })
         });
         showToast(bpId ? 'Template updated!' : 'Template created!', 'ok');
@@ -383,6 +390,12 @@ function addServiceCard() {
             
             card.querySelector('[name="image_tag"]').value = bp.image_tag || '';
             card.querySelector('[name="internal_port"]').value = bp.default_port || '80';
+            
+            // Populate resource limits from blueprint
+            const cpuInput = card.querySelector('[name="cpu_limit"]');
+            if (cpuInput) cpuInput.value = bp.cpu_limit || '';
+            const memInput = card.querySelector('[name="mem_limit"]');
+            if (memInput) memInput.value = bp.mem_limit || '512m';
             
             // clear old envs
             const envContainer = card.querySelector('.env-vars-container');
@@ -650,6 +663,12 @@ async function editDeployment(id) {
                 card.querySelector('.src-image-radio').click();
                 card.querySelector('[name="image_tag"]').value = c.image;
             }
+
+            // Restore resource limits if stored on the container object
+            const cpuInput = card.querySelector('[name="cpu_limit"]');
+            if (cpuInput && c.cpu_limit) cpuInput.value = c.cpu_limit;
+            const memInput = card.querySelector('[name="mem_limit"]');
+            if (memInput) memInput.value = c.mem_limit || '512m';
         });
         updateDependencySelects();
     } catch (e) {
@@ -695,6 +714,8 @@ async function handleCreate(e) {
             const gitUrl = (card.querySelector('[name="git_url"]').value || '').trim();
             if (!gitUrl) { showToast('Git URL is required for ' + (containerName || 'a container'), 'error'); return; }
             const port = parseInt(card.querySelector('[name="git_internal_port"]').value || '80', 10);
+            const cpuLimit = (card.querySelector('[name="cpu_limit"]').value || '').trim() || undefined;
+            const memLimit = (card.querySelector('[name="mem_limit"]').value || '').trim() || undefined;
             containerSpec = {
                 name: containerName || 'git-app',
                 role: role,
@@ -702,12 +723,16 @@ async function handleCreate(e) {
                 ports: { [port]: port },
                 env_vars: envObj,
                 volumes: finalVolumes,
-                depends_on: dependsOn.length > 0 ? dependsOn : undefined
+                depends_on: dependsOn.length > 0 ? dependsOn : undefined,
+                cpu_limit: cpuLimit,
+                mem_limit: memLimit,
             };
         } else {
             const imageTag = (card.querySelector('[name="image_tag"]').value || '').trim();
             if (!imageTag) { showToast('Docker image tag is required for ' + (containerName || 'a container'), 'error'); return; }
             const port = parseInt(card.querySelector('[name="internal_port"]').value || '80', 10);
+            const cpuLimit = (card.querySelector('[name="cpu_limit"]').value || '').trim() || undefined;
+            const memLimit = (card.querySelector('[name="mem_limit"]').value || '').trim() || undefined;
             containerSpec = {
                 name: containerName || 'image-app',
                 role: role,
@@ -715,7 +740,9 @@ async function handleCreate(e) {
                 ports: { [port]: port },
                 env_vars: envObj,
                 volumes: finalVolumes,
-                depends_on: dependsOn.length > 0 ? dependsOn : undefined
+                depends_on: dependsOn.length > 0 ? dependsOn : undefined,
+                cpu_limit: cpuLimit,
+                mem_limit: memLimit,
             };
         }
         containers.push(containerSpec);
@@ -782,6 +809,18 @@ async function handleDelete(id, projectId = null, redirect = false) {
 }
 
 // ===== AUTHENTICATION =====
+function toggleAuthForm(formType) {
+    const loginCard = document.getElementById('login-card');
+    const registerCard = document.getElementById('register-card');
+    if (formType === 'register') {
+        loginCard.style.display = 'none';
+        registerCard.style.display = 'block';
+    } else {
+        loginCard.style.display = 'block';
+        registerCard.style.display = 'none';
+    }
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     const btn = document.getElementById('login-submit-btn');
@@ -806,6 +845,40 @@ async function handleLogin(e) {
         showToast('Login failed: ' + err.message, 'error');
     } finally {
         btn.textContent = 'Authorize';
+        btn.disabled = false;
+    }
+}
+
+async function handleRegister(e) {
+    e.preventDefault();
+    const btn = document.getElementById('register-submit-btn');
+    const fd = new FormData(e.target);
+    
+    const payload = {
+        username: fd.get('username'),
+        email: fd.get('email'),
+        password: fd.get('password')
+    };
+
+    try {
+        btn.textContent = 'Creating Account...';
+        btn.disabled = true;
+        
+        await api('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        
+        showToast('Registration successful! Please log in.', 'ok');
+        e.target.reset();
+        
+        toggleAuthForm('login');
+        document.querySelector('#login-form input[name="username"]').value = payload.username;
+        
+    } catch (err) {
+        showToast('Registration failed: ' + err.message, 'error');
+    } finally {
+        btn.textContent = 'Create Account';
         btn.disabled = false;
     }
 }
@@ -905,6 +978,11 @@ function addEventListeners() {
     document.getElementById('create-form').addEventListener('submit', handleCreate);
     document.getElementById('blueprint-form').addEventListener('submit', handleCreateBlueprint);
     document.getElementById('login-form').addEventListener('submit', handleLogin);
+    
+    const registerForm = document.getElementById('register-form');
+    if (registerForm) {
+        registerForm.addEventListener('submit', handleRegister);
+    }
     
     // Attach listener to Add Service button
     const addServiceBtn = document.getElementById('add-service-btn');

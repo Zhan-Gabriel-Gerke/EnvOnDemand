@@ -45,6 +45,10 @@ class DeploymentContainerCreate(BaseModel):
         default_factory=list,
         description="Names of containers this container depends on. Dependent containers will wait until these are RUNNING."
     )
+    mem_limit: Optional[str] = Field(
+        default="512m",
+        description="Docker memory limit string, e.g. '512m', '1g'. Passed directly to the Docker daemon.",
+    )
 
     @model_validator(mode="after")
     def check_image_or_git_url(self) -> "DeploymentContainerCreate":
