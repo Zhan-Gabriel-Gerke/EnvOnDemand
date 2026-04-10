@@ -49,6 +49,10 @@ class DeploymentContainerCreate(BaseModel):
         default="512m",
         description="Docker memory limit string, e.g. '512m', '1g'. Passed directly to the Docker daemon.",
     )
+    cpu_limit: Optional[str] = Field(
+        default=None,
+        description="Docker CPU limit string, e.g. '0.5' or '1'. Passed to the Docker daemon.",
+    )
 
     @model_validator(mode="after")
     def check_image_or_git_url(self) -> "DeploymentContainerCreate":

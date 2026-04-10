@@ -11,7 +11,7 @@ from app.schemas.deployment import DeploymentRead, DeploymentCreate, DeploymentC
 from app.crud import deployment as crud
 from app.db.session import get_db, AsyncSessionLocal
 from app.models.models import DeploymentStatus, ContainerStatus, User
-from app.services.docker_service import DockerService, DockerServiceError, GitCloneError
+from app.services.docker_service import DockerService, DockerServiceError, GitCloneError, ContainerStartError
 
 router = APIRouter()
 
@@ -22,8 +22,8 @@ router = APIRouter()
 
 async def _wait_for_port(port: int, host: str = "127.0.0.1", timeout: int = 60) -> bool:
     """
-    Проверяет доступность порта. Полезно как Healthcheck базы данных 
-    перед запуском зависимых приложений.
+    Checks port availability. Useful as a database health check before 
+    starting dependent applications.
     """
     loop = asyncio.get_running_loop()
     start_time = loop.time()
@@ -55,20 +55,43 @@ async def _deploy_single_container(
         internal_port = next(iter(container_spec.ports.values())) if container_spec.ports else 80
 
         if container_spec.git_url:
-            run_info = await docker_service.build_and_run_from_git(
-                git_url=container_spec.git_url,
-                name=container_spec.name,
+            await crud.update_container_status(db, container_db_id=db_container_id, lifecycle_phase="FETCHING")
+            try:
+                tmp_dir = await docker_service.clone_repo(container_spec.git_url)
+            except GitCloneError as e:
+                await crud.update_container_status(db, container_db_id=db_container_id, status=ContainerStatus.FAILED, last_error=str(e), lifecycle_phase="FETCHING FAILED")
+                return False
+
+            image_tag = f"envondemand/{container_spec.name.lower()}:latest"
+            await crud.update_container_status(db, container_db_id=db_container_id, lifecycle_phase="BUILDING")
+            try:
+                build_logs = await docker_service.build_image(tmp_dir, image_tag)
+                await crud.update_container_status(db, container_db_id=db_container_id, build_logs=build_logs)
+            except ContainerStartError as e:
+                docker_service.cleanup_repo(tmp_dir)
+                await crud.update_container_status(db, container_db_id=db_container_id, status=ContainerStatus.FAILED, last_error=str(e), lifecycle_phase="BUILDING FAILED")
+                return False
+
+            docker_service.cleanup_repo(tmp_dir)
+
+            await crud.update_container_status(db, container_db_id=db_container_id, lifecycle_phase="STARTING")
+            run_info = await docker_service.run_container(
+                image_tag=image_tag,
                 internal_port=internal_port,
                 environment=container_spec.env_vars,
+                cpu_limit=container_spec.cpu_limit,
                 mem_limit=container_spec.mem_limit,
                 network=network_name,
+                name=container_spec.name,
                 volumes=container_spec.volumes,
             )
         else:
+            await crud.update_container_status(db, container_db_id=db_container_id, lifecycle_phase="STARTING")
             run_info = await docker_service.run_container(
                 image_tag=container_spec.image,  # type: ignore[arg-type]
                 internal_port=internal_port,
                 environment=container_spec.env_vars,
+                cpu_limit=container_spec.cpu_limit,
                 mem_limit=container_spec.mem_limit,
                 network=network_name,
                 name=container_spec.name,
@@ -76,15 +99,28 @@ async def _deploy_single_container(
             )
 
         host_port = run_info.get("port")
+        internal_ip = run_info.get("ip")
         
-        # Ждем готовности, если порты были явно заданы юзером. Воркеры без портов игнорируют это.
-        if host_port and has_explicit_ports:
-            print(f"[Deployment] Waiting for healthcheck (port {host_port}) for '{container_spec.name}'...")
-            is_ready = await _wait_for_port(port=host_port)
+        # Wait for readiness if ports were explicitly specified by the user. Workers without ports ignore this.
+        # We check the INTERNAL IP and INTERNAL PORT because the Orchestrator itself is containerized.
+        if internal_ip and internal_port and has_explicit_ports:
+            print(f"[Deployment] Waiting for healthcheck (http://{internal_ip}:{internal_port}) for '{container_spec.name}'...")
+            is_ready = await _wait_for_port(port=internal_port, host=internal_ip)
             if not is_ready:
-                print(f"[Deployment] Healthcheck timeout: port {host_port} not ready.")
+                # Capture logs to see WHY it failed (e.g. crash during startup)
+                logs = ""
+                try:
+                    logs = await docker_service.get_container_logs(run_info["container_id"], tail=20)
+                except Exception:
+                    pass
+                
+                err_msg = f"Healthcheck timeout: port {internal_port} at {internal_ip} not ready."
+                if logs:
+                    err_msg += f"\n\n--- LAST LOGS ---\n{logs}"
+
+                print(f"[Deployment] {err_msg}")
                 await crud.update_container_status(
-                    db, container_db_id=db_container_id, status=ContainerStatus.FAILED
+                    db, container_db_id=db_container_id, status=ContainerStatus.FAILED, last_error=err_msg, lifecycle_phase="FAILED"
                 )
                 return False
 
@@ -94,20 +130,21 @@ async def _deploy_single_container(
             status=ContainerStatus.RUNNING,
             docker_container_id=run_info["container_id"],
             host_port=host_port,
+            lifecycle_phase="RUNNING"
         )
         return True
 
     except (DockerServiceError, ConnectionError) as exc:
         print(f"[Deployment] Container '{container_spec.name}' failed: {exc}")
         await crud.update_container_status(
-            db, container_db_id=db_container_id, status=ContainerStatus.FAILED
+            db, container_db_id=db_container_id, status=ContainerStatus.FAILED, last_error=str(exc), lifecycle_phase="STARTING FAILED"
         )
         return False
 
     except Exception as exc:
         print(f"[Deployment] Unexpected error for container '{container_spec.name}': {exc}")
         await crud.update_container_status(
-            db, container_db_id=db_container_id, status=ContainerStatus.FAILED
+            db, container_db_id=db_container_id, status=ContainerStatus.FAILED, last_error=str(exc), lifecycle_phase="STARTING FAILED"
         )
         return False
 
@@ -131,10 +168,10 @@ async def run_multi_container_deployment(
 
                 network_name = db_deployment.network_name
                 
-                # Словарик, чтобы находить id контейнера в БД по его имени
+                # Dictionary to find a container's ID in the database by its name
                 db_containers_map = {c.name: c for c in db_deployment.containers}
 
-                # Создаем Event-эвенты (маяки) и словарь результатов для каждого контейнера
+                # Create Event beacons and a dictionary of results for each container
                 events = {spec.name: asyncio.Event() for spec in container_specs}
                 results = {spec.name: False for spec in container_specs}
 
@@ -145,11 +182,11 @@ async def run_multi_container_deployment(
                         return
 
                     try:
-                        # 1. ЖДЕМ ЗАВИСИМОСТИ
+                        # 1. WAIT FOR DEPENDENCIES
                         for dep in spec.depends_on or []:
                             if dep in events:
-                                await events[dep].wait() # Ждем сигнала от предка!
-                                # Если предок после запуска выдал False (провалился), мы даже не стартуем
+                                await events[dep].wait() # Wait for signal from the parent
+                                # If the parent returns False (failed) after starting, we don't even start
                                 if not results[dep]:
                                     print(f"[Deployment] Dependency '{dep}' failed, skipping '{spec.name}'.")
                                     await crud.update_container_status(
@@ -159,7 +196,7 @@ async def run_multi_container_deployment(
                                     )
                                     return # Abort startup
 
-                        # 2. ВСЕ ПРЕДКИ РАБОТАЮТ — ЗАПУСКАЕМ СВОЙ КОНТЕЙНЕР
+                        # 2. ALL PARENTS RUNNING — START OWN CONTAINER
                         success = await _deploy_single_container(
                             docker_service, db, db_container.id, spec, network_name
                         )
@@ -170,15 +207,15 @@ async def run_multi_container_deployment(
                         results[spec.name] = False
                     
                     finally:
-                        # 3. Сигнализируем, что мы закончили попытку запуска. 
-                        # Следующий в очереди сбросит wait() и начнет читать results.
+                        # 3. Signal that we've finished the startup attempt.
+                        # The next one in the queue will release wait() and start reading results.
                         events[spec.name].set()
 
-                # Закидываем все задачи в gather единовременно. Event'ы выстроят их в очередь внутри.
+                # Submit all tasks to gather at once. Events will build a queue internally.
                 tasks = [asyncio.create_task(deploy_task(spec)) for spec in container_specs]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Проверяем итог всей операции: если у всех контейнеров True - успех, иначе провал.
+                # Check the overall result: if all containers are True - success, otherwise failure.
                 final_status = (
                     DeploymentStatus.RUNNING if all(results.values()) else DeploymentStatus.FAILED
                 )
@@ -249,7 +286,7 @@ async def create_deployment(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"A deployment with the network name '{deployment_in.network_name}' already exists." if deployment_in.network_name else "Database integrity error (likely a duplicate constraint).",
+            detail=f"A deployment with the network name '{deployment_in.network_name}' already exists. Use 'Edit' (pencil icon) on the Dashboard if you want to modify it." if deployment_in.network_name else "Database integrity error (likely a duplicate constraint).",
         )
 
     # --- Schedule background work ---
@@ -278,6 +315,9 @@ async def update_deployment(
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this deployment.")
         
     # Check quota difference
     old_length = len(db_deployment.containers) if db_deployment.containers else 0
@@ -327,20 +367,27 @@ async def list_deployments(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
+    current_user: User = Depends(get_current_user),
 ) -> List[DeploymentRead]:
-    """Retrieve a paginated list of all deployments."""
-    return await crud.get_deployments(db, skip=skip, limit=limit)
+    """Retrieve a paginated list of deployments for the current user (admins see all)."""
+    user_id = None if current_user.role == "admin" else current_user.id
+    return await crud.get_deployments(db, skip=skip, limit=limit, user_id=user_id)
 
 
 @router.get("/deployments/{deployment_id}", response_model=DeploymentRead)
 async def get_deployment(
     deployment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> DeploymentRead:
     """Retrieve a single deployment by its ID."""
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+    
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this deployment.")
+        
     return db_deployment
 
 
@@ -348,22 +395,33 @@ async def get_deployment(
 async def delete_deployment(
     deployment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """Stop all containers and delete the deployment record."""
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this deployment.")
 
-    # Stop every running container in the deployment.
+    # Remove every running container in the deployment.
     if db_deployment.containers:
         async with DockerService() as docker_service:
             for container in db_deployment.containers:
                 if container.container_id:
                     try:
-                        await docker_service.stop_container(container.container_id)
+                        await docker_service.remove_container(container.container_id)
                     except (DockerServiceError, ConnectionError, Exception) as exc:
                         # Log but don't block DB cleanup.
                         print(f"[Deployment] Could not remove container {container.container_id}: {exc}")
+
+            # Clean up the associated network if it exists
+            if db_deployment.network_name:
+                try:
+                    await docker_service.remove_network(db_deployment.network_name)
+                except (DockerServiceError, Exception) as exc:
+                    print(f"[Deployment] Could not remove network {db_deployment.network_name}: {exc}")
 
     await crud.delete_deployment(db, deployment_id=deployment_id)
 
@@ -372,11 +430,15 @@ async def delete_deployment(
 async def stop_deployment(
     deployment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Stop a running deployment (removes containers, keeps the DB record)."""
+    """Stop a running deployment (pauses containers, keeps the DB record)."""
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to stop this deployment.")
 
     if db_deployment.status == DeploymentStatus.STOPPED:
         return {"message": "Already stopped."}
@@ -400,28 +462,34 @@ async def start_deployment(
     deployment_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Re-start a stopped deployment by replaying the container creation."""
+    """Start a stopped deployment."""
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to start this deployment.")
 
     if db_deployment.status == DeploymentStatus.RUNNING:
         return {"message": "Already running."}
 
-    await crud.update_deployment_status(
-        db, deployment_id=deployment_id, status=DeploymentStatus.PENDING
-    )
+    async with DockerService() as docker_service:
+        for container in db_deployment.containers:
+            if container.container_id:
+                try:
+                    await docker_service.start_container(container.container_id)
+                    await crud.update_container_status(
+                        db, container_db_id=container.id, status=ContainerStatus.RUNNING, lifecycle_phase="RUNNING"
+                    )
+                except Exception as exc:
+                    print(f"[Deployment] Error starting container {container.container_id}: {exc}")
 
-    # Re-build specs from DB so we can enqueue the background task.
-    # For git-sourced containers, image starts with "git:" — we cannot re-clone
-    # without the original URL, so re-start is only safe for image-based containers.
-    background_tasks.add_task(
-        run_multi_container_deployment,
-        db_deployment.id,
-        [],  # empty specs — background task will log a mismatch and mark FAILED for git-based
+    await crud.update_deployment_status(
+        db, deployment_id=deployment_id, status=DeploymentStatus.RUNNING
     )
-    return {"message": "Deployment starting …"}
+    return {"message": "Deployment started."}
 
 
 @router.get("/deployments/{deployment_id}/logs")
@@ -429,22 +497,36 @@ async def get_deployment_logs(
     deployment_id: uuid.UUID,
     tail: int = 100,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """Retrieve the last N log lines from all containers in a deployment."""
     db_deployment = await crud.get_deployment(db, deployment_id=deployment_id)
     if not db_deployment:
         raise HTTPException(status_code=404, detail="Deployment not found.")
+        
+    if current_user.role != "admin" and db_deployment.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view logs for this deployment.")
 
     all_logs: dict = {}
     async with DockerService() as docker_service:
         for container in db_deployment.containers:
             if not container.container_id:
-                all_logs[container.name] = "Container not started yet."
+                log_msg = f"Phase: {container.lifecycle_phase or 'PENDING'}\n"
+                if container.last_error:
+                    log_msg += f"\n--- ERROR ---\n{container.last_error}\n"
+                elif container.build_logs:
+                    log_msg += f"\n--- BUILD LOGS ---\n{container.build_logs}\n"
+                else:
+                    log_msg += "\nContainer not started yet."
+                all_logs[container.name] = log_msg
                 continue
             try:
-                all_logs[container.name] = await docker_service.get_container_logs(
+                logs = await docker_service.get_container_logs(
                     container.container_id, tail=tail
                 )
+                if container.last_error:
+                    logs = f"--- STARTUP ERROR ---\n{container.last_error}\n\n--- CONTAINER LOGS ---\n{logs}"
+                all_logs[container.name] = logs
             except (DockerServiceError, Exception) as exc:
                 all_logs[container.name] = f"Could not retrieve logs: {exc}"
 

@@ -447,7 +447,7 @@
         }
 
         .badge::before {
-            content: '●';
+            content: 'â—';
             font-size: 7px;
         }
 
@@ -854,7 +854,7 @@
                 <span>▣</span> Active Environments
             </a>
             <a href="#blueprints" class="nav-item" id="nav-blueprints">
-                <span>◈</span> Image Templates
+                <span>⬥</span> Image Templates
             </a>
             <a href="#volumes" class="nav-item" id="nav-volumes">
                 <span>💾</span> Storage Volumes
@@ -866,11 +866,11 @@
             <div class="project-item"><span class="dot dot-g"></span> Loading...</div>
         </div>
 
-        <div class="sidebar-user">
-            <div class="user-avatar">A</div>
+        <div class="sidebar-user" id="sidebar-user-card" style="display: none;">
+            <div class="user-avatar" id="sidebar-user-avatar">A</div>
             <div>
-                <div class="user-name">Admin</div>
-                <div class="user-email">admin@example.com</div>
+                <div class="user-name" id="sidebar-user-name">Loading...</div>
+                <div class="user-email" id="sidebar-user-email"></div>
             </div>
             <button class="btn-logout" onclick="logout()" title="Logout" style="display:flex;align-items:center;justify-content:center;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1055,7 +1055,7 @@
         <!-- Template for Container Card -->
         <template id="service-card-template">
             <div class="container-card service-form" style="background: #0f1117; border: 1px solid #1e2332; border-radius: 8px; padding: 20px; margin-top: 20px; position: relative;">
-                <button type="button" class="ab del btn-remove-container" style="position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;" onclick="removeContainerCard(this)" title="Remove Container">✕</button>
+                <button type="button" class="ab del btn-remove-container" style="position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;" onclick="removeContainerCard(this)" title="Remove Container">✖</button>
                 <div style="font-size: 14px; font-weight: 600; color: #f0f4ff; margin-bottom: 16px;" class="card-heading">Service Configuration</div>
                 
                 <!-- Container name, Role, Depends On -->
@@ -1226,7 +1226,10 @@
                             <h3>Environment</h3>
                             <code id="det-id" class="det-id"></code>
                         </div>
-                        <span id="det-status" class="badge"></span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <button id="det-edit-btn" class="ab" style="padding: 6px 12px; height: auto;" title="Edit Environment">&#9998; Edit</button>
+                            <span id="det-status" class="badge"></span>
+                        </div>
                     </div>
                     <hr class="divider">
                     <div class="df">
@@ -1253,7 +1256,7 @@
     </div>
 
     <div id="toast"></div>
-    <script src="/static/js/app.js?v=19"></script>
+    <script src="/static/js/app.js?v=26"></script>
 </body>
 
 </html>

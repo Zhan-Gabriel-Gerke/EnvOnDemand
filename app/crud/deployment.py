@@ -31,15 +31,13 @@ async def get_deployment(db: AsyncSession, deployment_id: uuid.UUID) -> Optional
 
 
 async def get_deployments(
-    db: AsyncSession, skip: int = 0, limit: int = 100
+    db: AsyncSession, skip: int = 0, limit: int = 100, user_id: Optional[uuid.UUID] = None
 ) -> List[Deployment]:
     """Fetch a paginated list of all Deployments (eager-loads containers)."""
-    result = await db.execute(
-        select(Deployment)
-        .options(selectinload(Deployment.containers))
-        .offset(skip)
-        .limit(limit)
-    )
+    query = select(Deployment).options(selectinload(Deployment.containers))
+    if user_id:
+        query = query.filter(Deployment.user_id == user_id)
+    result = await db.execute(query.offset(skip).limit(limit))
     return result.scalars().all()
 
 
@@ -142,21 +140,31 @@ async def update_container_status(
     db: AsyncSession,
     *,
     container_db_id: uuid.UUID,
-    status: ContainerStatus,
+    status: Optional[ContainerStatus] = None,
     docker_container_id: Optional[str] = None,
     host_port: Optional[int] = None,
+    lifecycle_phase: Optional[str] = None,
+    last_error: Optional[str] = None,
+    build_logs: Optional[str] = None,
 ) -> Optional[DeploymentContainer]:
-    """Update a DeploymentContainer's runtime status, Docker container ID, and host port."""
+    """Update a DeploymentContainer's runtime status, Docker container ID, host port, and logging fields."""
     result = await db.execute(
         select(DeploymentContainer).filter(DeploymentContainer.id == container_db_id)
     )
     db_container = result.scalars().first()
     if db_container:
-        db_container.status = status
-        if docker_container_id:
+        if status is not None:
+            db_container.status = status
+        if docker_container_id is not None:
             db_container.container_id = docker_container_id
         if host_port is not None:
             db_container.host_port = host_port
+        if lifecycle_phase is not None:
+            db_container.lifecycle_phase = lifecycle_phase
+        if last_error is not None:
+            db_container.last_error = last_error
+        if build_logs is not None:
+            db_container.build_logs = build_logs
         await db.commit()
         await db.refresh(db_container)
     return db_container

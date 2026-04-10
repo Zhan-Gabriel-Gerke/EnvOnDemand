@@ -188,11 +188,16 @@ class DeploymentContainer(Base):
         index=True
     )
 
+    # Pre-flight and logging fields
+    lifecycle_phase: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    build_logs: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     # Relationships
     deployment: Mapped["Deployment"] = relationship("Deployment", back_populates="containers")
 
     def __repr__(self) -> str:
-        return f"<DeploymentContainer(name='{self.name}', role='{self.role}', status='{self.status.value}')>"
+        return f"<DeploymentContainer(name='{self.name}', role='{self.role}', status='{self.status.value}', phase='{self.lifecycle_phase}')>"
 
 
 class AuditLog(Base):

@@ -60,8 +60,41 @@ async function api(path, options = {}) {
 
     if (response.status === 204) return null;
     const data = await response.json();
+
+    // Auto-logout on stale/defunct session detected by the backend
+    if (!response.ok && data.detail && data.detail.toLowerCase().includes('defunct')) {
+        localStorage.removeItem('auth_token');
+        showToast('Your session has expired. Please log in again.', 'error');
+        setTimeout(() => { window.location.hash = '#login'; }, 1500);
+        throw new Error('Session expired.');
+    }
+
     if (!response.ok) throw new Error(data.detail || `Error ${response.status}`);
     return data;
+}
+
+// ===== FETCH USER =====
+async function fetchCurrentUser() {
+    if (state.user) return state.user;
+    try {
+        const user = await api('/auth/me');
+        state.user = user;
+        
+        const card = document.getElementById('sidebar-user-card');
+        const avatar = document.getElementById('sidebar-user-avatar');
+        const name = document.getElementById('sidebar-user-name');
+        const email = document.getElementById('sidebar-user-email');
+        
+        if (card) card.style.display = 'flex';
+        if (avatar) avatar.textContent = user.username.charAt(0).toUpperCase();
+        if (name) name.textContent = user.username;
+        if (email) email.textContent = user.email;
+        
+        return user;
+    } catch (e) {
+        console.error("Failed to load user info", e);
+        return null;
+    }
 }
 
 // ===== ROUTER =====
@@ -77,6 +110,10 @@ function navigate() {
         if (!token && view !== 'login') {
             window.location.hash = '#login';
             return;
+        }
+
+        if (token && view !== 'login') {
+            fetchCurrentUser();
         }
 
         document.querySelectorAll('.view-container').forEach(el => el.classList.remove('view-active'));
@@ -215,7 +252,7 @@ async function renderDashboard() {
                             <button class="ab btn-edit" onclick="editDeployment('${d.id}')" title="Edit">&#9998;</button>
                             ${statusKey === 'STOPPED' ? `<button class="ab" onclick="handleAction('${d.id}','start')" title="Start">&#9654;</button>` : ''}
                             ${statusKey === 'RUNNING' ? `<button class="ab" onclick="handleAction('${d.id}','stop')" title="Stop">&#9209;</button>` : ''}
-                            <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                            <button class="ab del" onclick="handleDelete('${d.id}')" title="Delete"><svg style="pointer-events: none;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                         </div>
                     </td>
                 </tr>`;
@@ -461,15 +498,25 @@ function addServiceCard() {
     function parseCardBulkEnv() {
         const raw = bulkArea.value;
         if (!raw.trim()) return;
-        const lines = raw.split('\n');
+        const lines = raw.split(/\r?\n/);
         let added = 0;
         lines.forEach(line => {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith('#')) return;
             const eqIdx = trimmed.indexOf('=');
             if (eqIdx === -1) return;
+            
             const key = trimmed.slice(0, eqIdx).trim();
-            const value = trimmed.slice(eqIdx + 1).trim();
+            let value = trimmed.slice(eqIdx + 1).trim();
+            
+            // Strip ONLY outer surrounding quotes commonly found in .env files
+            const hasDoubleQuotes = value.startsWith('"') && value.endsWith('"');
+            const hasSingleQuotes = value.startsWith("'") && value.endsWith("'");
+            
+            if ((hasDoubleQuotes || hasSingleQuotes) && value.length >= 2) {
+                value = value.slice(1, -1);
+            }
+
             if (!key) return;
             addEnvVarToContainer(envContainer, key, value);
             added++;
@@ -555,11 +602,31 @@ function updateDependencySelects() {
 function addEnvVarToContainer(containerEl, key = '', val = '') {
     const row = document.createElement('div');
     row.className = 'ev-row';
-    row.innerHTML = `
-        <input type="text" class="fi env-key-input" placeholder="KEY" value="${key}">
-        <input type="text" class="fi env-val-input" placeholder="VALUE" value="${val}">
-        <button type="button" class="ab" onclick="this.parentElement.remove()" title="Remove" style="color:#f87171;">✕</button>
-    `;
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.className = 'fi env-key-input';
+    keyInput.placeholder = 'KEY';
+    keyInput.value = key;
+
+    const valInput = document.createElement('input');
+    valInput.type = 'text';
+    valInput.className = 'fi env-val-input';
+    valInput.placeholder = 'VALUE';
+    valInput.value = val;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ab';
+    btn.title = 'Remove';
+    btn.style.color = '#f87171';
+    btn.textContent = '✕';
+    btn.onclick = function() { row.remove(); };
+
+    row.appendChild(keyInput);
+    row.appendChild(valInput);
+    row.appendChild(btn);
+
     containerEl.appendChild(row);
 }
 
@@ -582,6 +649,11 @@ async function renderDetails(id) {
             const statusEl = document.getElementById('det-status');
             statusEl.textContent = d.status;
             statusEl.className = `status-badge badge-${d.status}`;
+            
+            const editBtn = document.getElementById('det-edit-btn');
+            if (editBtn) {
+                editBtn.onclick = () => editDeployment(id);
+            }
 
             // New model: show network_name and container list instead of image_tag/port
             const envName = d.network_name || d.id.substring(0, 8);
@@ -594,14 +666,14 @@ async function renderDetails(id) {
                     containers.map(c => `${c.role}: ${c.image} (${c.status})`).join(' | ') || '—';
             }
 
-            // Build Public URL from host_port of the app/frontend container
+            // Build Public URLs for all containers that have host_port
             const link = document.getElementById('det-link');
             if (link) {
-                const appContainer = (d.containers || []).find(c =>
-                    c.host_port && ['frontend', 'app', 'backend', 'web'].includes(c.role)
-                ) || (d.containers || []).find(c => c.host_port);
-                if (appContainer && appContainer.host_port) {
-                    link.innerHTML = `<a href="http://localhost:${appContainer.host_port}" target="_blank">http://localhost:${appContainer.host_port}</a>`;
+                const containersWithPorts = (d.containers || []).filter(c => c.host_port);
+                if (containersWithPorts.length > 0) {
+                    link.innerHTML = containersWithPorts.map(c => 
+                        `<div style="margin-bottom: 4px;"><strong>${c.name}:</strong> <a href="http://localhost:${c.host_port}" target="_blank">http://localhost:${c.host_port}</a></div>`
+                    ).join('');
                 } else {
                     link.innerHTML = 'Pending...';
                 }
@@ -785,6 +857,7 @@ async function handleAction(id, action) {
 }
 
 async function handleDelete(id, projectId = null, redirect = false) {
+    console.log("Delete triggered for:", id);
     if (!confirm('Delete this environment?')) return;
     try {
         await api(`/deployments/${id}`, { method: 'DELETE' });
@@ -969,6 +1042,7 @@ async function promptCreateVolumeForForm(btn) {
 
 function logout() {
     localStorage.removeItem('auth_token');
+    state.user = null;
     window.location.hash = '#login';
     showToast('Logged out securely', 'ok');
 }

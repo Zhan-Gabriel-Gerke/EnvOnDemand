@@ -9,6 +9,7 @@ from app.models.models import User
 from app.core.security import verify_password, create_access_token
 from app.schemas.user import UserCreate, UserRead
 import app.crud.user as crud_user
+from app.api.deps import get_current_user
 
 router = APIRouter()
 
@@ -77,3 +78,13 @@ async def register(
     # Proceed to create user
     new_user = await crud_user.create_user(db, user_in=user_in)
     return new_user
+
+
+@router.get("/me", response_model=UserRead)
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user)
+) -> UserRead:
+    """
+    Get current logged in user information.
+    """
+    return current_user
