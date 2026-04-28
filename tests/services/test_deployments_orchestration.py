@@ -452,7 +452,9 @@ async def test_git_url_container_uses_build_and_run_from_git(
     deployment_id = deployment.id
 
     mock_constructor, mock_ds = _make_mock_docker_service()
-    mock_ds.build_and_run_from_git.return_value = {
+    mock_ds.clone_repo.return_value = "/tmp/fake"
+    mock_ds.build_image.return_value = "logs"
+    mock_ds.run_container.return_value = {
         "container_id": "git_built_id",
         "port": 7000,
     }
@@ -466,14 +468,13 @@ async def test_git_url_container_uses_build_and_run_from_git(
 
     dep = await _refresh_deployment(db_session, deployment_id)
 
-    # Assert — build_and_run_from_git was called, run_container was NOT
-    mock_ds.build_and_run_from_git.assert_called_once()
-    mock_ds.run_container.assert_not_called()
+    # Assert — git clone and build were called
+    mock_ds.clone_repo.assert_called_once_with(git_url)
+    mock_ds.build_image.assert_called_once()
+    mock_ds.run_container.assert_called_once()
 
-    # Assert — git_url and mem_limit were forwarded
-    _args, kwargs = mock_ds.build_and_run_from_git.call_args
-    assert kwargs.get("git_url") == git_url
-    assert kwargs.get("name") == "git-svc"
+    # Assert — mem_limit was forwarded to run_container
+    _args, kwargs = mock_ds.run_container.call_args
     assert kwargs.get("mem_limit") == "512m"
 
     # Assert — DB state
@@ -511,7 +512,7 @@ async def test_nonexistent_deployment_id_handled_gracefully(
 
     # Assert — Docker was never called
     mock_ds.run_container.assert_not_called()
-    mock_ds.build_and_run_from_git.assert_not_called()
+    mock_ds.clone_repo.assert_not_called()
 
 
 # ===========================================================================
