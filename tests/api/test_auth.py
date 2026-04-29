@@ -180,3 +180,89 @@ async def test_login_empty_credentials_returns_422(client: AsyncClient):
 
     # Assert
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+# ---------------------------------------------------------------------------
+# Tests — /register endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_register_new_user_returns_201(client: AsyncClient):
+    """POST /register with a fresh username/email returns HTTP 201 and user data."""
+    payload = {
+        "username": "newuser_reg",
+        "email": "newuser_reg@test.com",
+        "password": "somepassword",
+    }
+    response = await client.post("/api/auth/register", json=payload)
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["username"] == "newuser_reg"
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_username_returns_400(client: AsyncClient):
+    """POST /register with an already-taken username returns HTTP 400."""
+    payload = {
+        "username": "dup_username",
+        "email": "dup1@test.com",
+        "password": "somepassword",
+    }
+    # First registration — must succeed
+    await client.post("/api/auth/register", json=payload)
+
+    # Second registration — same username, different email
+    payload2 = {**payload, "email": "dup2@test.com"}
+    response = await client.post("/api/auth/register", json=payload2)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["detail"] == "Username already registered"
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_email_returns_400(client: AsyncClient):
+    """POST /register with an already-taken email returns HTTP 400."""
+    payload = {
+        "username": "dup_email_user1",
+        "email": "dup_email@test.com",
+        "password": "somepassword",
+    }
+    # First registration — must succeed
+    await client.post("/api/auth/register", json=payload)
+
+    # Second registration — different username, same email
+    payload2 = {**payload, "username": "dup_email_user2"}
+    response = await client.post("/api/auth/register", json=payload2)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["detail"] == "Email already registered"
+
+
+# ---------------------------------------------------------------------------
+# Tests — /me endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_me_returns_current_user(client: AsyncClient, db_session):
+    """GET /me with a valid token returns the authenticated user's data."""
+    from app.crud.user import create_user
+    from app.core.security import create_access_token
+    from app.schemas.user import UserCreate
+
+    user_in = UserCreate(
+        username="me_user",
+        email="me_user@test.com",
+        password="mepassword",
+    )
+    user = await create_user(db_session, user_in=user_in)
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = await client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["username"] == "me_user"
+    assert data["id"] == str(user.id)

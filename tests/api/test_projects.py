@@ -319,3 +319,86 @@ async def test_create_duplicate_project_returns_409(
 
     # Assert
     assert second_resp.status_code == status.HTTP_409_CONFLICT
+
+
+# ---------------------------------------------------------------------------
+# Tests — create_project without owner_id (auto-admin branch)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_project_no_owner_id_admin_does_not_exist(
+    client: AsyncClient,
+    proj_auth_headers: dict,
+):
+    """
+    When owner_id is omitted AND no 'admin' user exists, the endpoint must
+    auto-create one and use it as the project owner — returns HTTP 201.
+
+    This covers lines 40-51 (both the admin-not-found sub-branch).
+    """
+    # The test DB is clean per-test, so no 'admin' user exists yet.
+    payload = {"name": "auto-admin-project-new"}
+
+    response = await client.post(
+        "/api/projects/", json=payload, headers=proj_auth_headers
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["name"] == "auto-admin-project-new"
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_create_project_no_owner_id_admin_already_exists(
+    client: AsyncClient,
+    proj_auth_headers: dict,
+):
+    """
+    When owner_id is omitted AND an 'admin' user already exists, the endpoint
+    must reuse that admin as the project owner — returns HTTP 201.
+
+    This covers lines 40-51 (the admin-found sub-branch).
+    """
+    # First call auto-creates the admin user
+    first = await client.post(
+        "/api/projects/",
+        json={"name": "admin-exists-proj-1"},
+        headers=proj_auth_headers,
+    )
+    assert first.status_code == status.HTTP_201_CREATED
+
+    # Second call: admin user now exists → reuse it
+    second = await client.post(
+        "/api/projects/",
+        json={"name": "admin-exists-proj-2"},
+        headers=proj_auth_headers,
+    )
+    assert second.status_code == status.HTTP_201_CREATED
+    assert second.json()["name"] == "admin-exists-proj-2"
+
+
+@pytest.mark.asyncio
+async def test_create_project_generic_exception_returns_500(
+    client: AsyncClient,
+    proj_user: User,
+    proj_auth_headers: dict,
+):
+    """
+    When crud_project.create_project raises a generic (non-unique) exception,
+    the endpoint must return HTTP 500 — covers the 'raise HTTPException(500)' branch.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.api.endpoints.projects.crud_project.create_project",
+        new=AsyncMock(side_effect=RuntimeError("unexpected db failure")),
+    ):
+        response = await client.post(
+            "/api/projects/",
+            json={"name": "boom", "owner_id": str(proj_user.id)},
+            headers=proj_auth_headers,
+        )
+
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR

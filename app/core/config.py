@@ -1,4 +1,9 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_FILE_PATH = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
@@ -15,7 +20,7 @@ class Settings(BaseSettings):
     class Config:
         """Pydantic model configuration."""
         # Specifies the file to load environment variables from.
-        env_file = ".env"
+        env_file = ENV_FILE_PATH
         extra = "ignore"
 
 

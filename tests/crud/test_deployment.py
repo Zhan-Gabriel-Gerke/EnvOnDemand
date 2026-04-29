@@ -463,3 +463,112 @@ async def test_delete_deployment_returns_none_for_unknown_id(db_session: AsyncSe
 
     # Assert — does not raise, returns None
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests — get_deployments (user_id filter branch)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_deployments_filtered_by_user(db_session: AsyncSession, test_user):
+    """Covers the `if user_id:` branch in get_deployments."""
+    containers = [DeploymentContainerCreate(name="w", image="nginx:latest", role="app")]
+    dep = await create_multi_container_deployment(
+        db_session,
+        user_id=test_user.id,
+        deployment_in=DeploymentCreate(containers=containers, network_name="filter-net"),
+    )
+    result = await get_deployments(db_session, user_id=test_user.id)
+    assert any(d.id == dep.id for d in result)
+
+
+@pytest.mark.asyncio
+async def test_get_deployments_no_filter(db_session: AsyncSession, single_container_deployment):
+    """Covers the else branch (no user_id) in get_deployments."""
+    result = await get_deployments(db_session)
+    assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests — update_container_status (all optional field branches + not-found)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_container_status_all_fields(
+    db_session: AsyncSession, single_container_deployment
+):
+    """Covers all optional branches in update_container_status."""
+    c = single_container_deployment.containers[0]
+    result = await update_container_status(
+        db_session,
+        container_db_id=c.id,
+        status=ContainerStatus.RUNNING,
+        docker_container_id="docker123",
+        host_port=9999,
+        lifecycle_phase="RUNNING",
+        last_error="none",
+        build_logs="build ok",
+    )
+    assert result.status == ContainerStatus.RUNNING
+    assert result.host_port == 9999
+    assert result.build_logs == "build ok"
+
+
+@pytest.mark.asyncio
+async def test_update_container_status_not_found_returns_none(db_session: AsyncSession):
+    """Covers the `if db_container:` branch being False."""
+    result = await update_container_status(
+        db_session, container_db_id=uuid.uuid4(), status=ContainerStatus.FAILED
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_status_not_found_returns_none(db_session: AsyncSession):
+    """Covers the `if db_deployment:` branch being False."""
+    result = await update_deployment_status(
+        db_session, deployment_id=uuid.uuid4(), status=DeploymentStatus.FAILED
+    )
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests — recreate_deployment_containers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_recreate_deployment_containers(db_session: AsyncSession, test_user):
+    """Covers recreate_deployment_containers with image-based container."""
+    from app.crud.deployment import recreate_deployment_containers
+    containers = [DeploymentContainerCreate(name="old", image="nginx:latest", role="app")]
+    dep = await create_multi_container_deployment(
+        db_session,
+        user_id=test_user.id,
+        deployment_in=DeploymentCreate(containers=containers, network_name=f"rec-net-{uuid.uuid4().hex[:6]}"),
+    )
+    dep_id = dep.id
+    new_containers = [DeploymentContainerCreate(name="new1", role="app", image="redis:alpine")]
+    await recreate_deployment_containers(db_session, dep_id, new_containers)
+    await db_session.commit()
+    db_session.expire_all()
+    refreshed = await get_deployment(db_session, dep_id)
+    assert any(c.name == "new1" for c in refreshed.containers)
+
+
+@pytest.mark.asyncio
+async def test_recreate_deployment_containers_git_url(db_session: AsyncSession, test_user):
+    """Covers the `git:` image label branch in recreate_deployment_containers."""
+    from app.crud.deployment import recreate_deployment_containers
+    containers = [DeploymentContainerCreate(name="old", image="nginx:latest", role="app")]
+    dep = await create_multi_container_deployment(
+        db_session,
+        user_id=test_user.id,
+        deployment_in=DeploymentCreate(containers=containers, network_name=f"rec-git-{uuid.uuid4().hex[:6]}"),
+    )
+    dep_id = dep.id
+    new_containers = [DeploymentContainerCreate(name="gitc", role="app", git_url="https://github.com/x/y")]
+    await recreate_deployment_containers(db_session, dep_id, new_containers)
+    await db_session.commit()
+    db_session.expire_all()
+    refreshed = await get_deployment(db_session, dep_id)
+    assert any("git:" in c.image for c in refreshed.containers)
